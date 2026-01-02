@@ -25,16 +25,16 @@ This error typically occurs due to one of the following:
 Based on your provided values:
 
 ```bash
-GOOGLE_CLIENT_ID=221611856308-vjnan4rjdcupnfr5el00494otoa2l251.apps.googleusercontent.com
-GOOGLE_CLIENT_SECRET=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
-ALLOWED_DOMAIN=zuputo.com
+GOOGLE_CLIENT_ID=xxxxxxxxxxxx.apps.googleusercontent.com
+GOOGLE_CLIENT_SECRET=xxxxxxxxxxxx-xxxxxxxxxxxx
+ALLOWED_DOMAIN=xxxxxxxxxxxx.com
 ```
 
 ## Required Steps
 
 1. **Add AUTH_SECRET to `.env.local`**:
    ```bash
-   AUTH_SECRET=KKdxfpW88aTU15+fQme0GhtYQWp1jGKd0AyUef76klA=
+   AUTH_SECRET=xxxxxxxxxxxxxxxxxxxxxxxx
    ```
    (Or generate a new one: `openssl rand -base64 32`)
 
@@ -64,7 +64,7 @@ GOOGLE_CLIENT_SECRET=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
 ALLOWED_DOMAIN=zuputo.com
 
 # NextAuth Configuration (REQUIRED)
-AUTH_SECRET=KKdxfpW88aTU15+fQme0GhtYQWp1jGKd0AyUef76klA=
+AUTH_SECRET=xxxxxxxxxxxxxxxxxxxxxxxx
 AUTH_URL=http://localhost:8001
 ```
 

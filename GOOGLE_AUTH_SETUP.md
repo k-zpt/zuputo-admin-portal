@@ -59,8 +59,8 @@ NEXT_PUBLIC_API_BASE_URL=http://127.0.0.1:8000
 NEXT_PUBLIC_PAYMENT_LINK_BASE_URL=http://localhost:8001
 
 # Google OAuth Configuration
-GOOGLE_CLIENT_ID=221611856308-vjnan4rjdcupnfr5el00494otoa2l251.apps.googleusercontent.com
-GOOGLE_CLIENT_SECRET=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
+GOOGLE_CLIENT_ID=xxxxxxxxxxxxxxxxxxxxxxxx-xxxxxxxxxxxxxxxxxxxxxxxx.apps.googleusercontent.com
+GOOGLE_CLIENT_SECRET=xxxxxxxxxxxxxxxxxxxxxxxx-xxxxxxxxxxxxxxxxxxxxxxxx
 ALLOWED_DOMAIN=zuputo.com
 
 # NextAuth Configuration (REQUIRED)

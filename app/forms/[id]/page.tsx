@@ -131,8 +131,8 @@ export default function FormDetailPage() {
           // If it's a string, try to find currency by ID or code
           // If currencies are loaded, convert code to ID; otherwise store as-is
           const currency = currencies.length > 0 && pricingInfo
-            ? (currencies.find(c => c.id === pricingInfo.currency) || 
-               currencies.find(c => c.code === pricingInfo.currency))
+            ? (currencies.find(c => c.id === pricingInfo!.currency) || 
+               currencies.find(c => c.code === pricingInfo!.currency))
             : null;
           if (currency) {
             // Convert to ID
@@ -329,7 +329,7 @@ export default function FormDetailPage() {
           });
         }),
         // Preserve list formatting
-        transformDocument: (document) => {
+        transformDocument: (document: any) => {
           return document;
         },
       };
@@ -484,7 +484,7 @@ export default function FormDetailPage() {
       // Get the filename and sanitize it
       const getSafeFilename = () => {
         // Try templateInfo first, then form.template as fallback
-        let filename = templateInfo?.filename || form?.template || null;
+        let filename = templateInfo?.filename || (form as any)?.template || null;
         
         // If filename contains a path (has slashes), extract just the filename part
         if (filename && filename.includes('/')) {
@@ -493,7 +493,7 @@ export default function FormDetailPage() {
         
         console.log('PDF Export - Available filename sources:', {
           templateInfoFilename: templateInfo?.filename,
-          formTemplate: form?.template,
+          formTemplate: (form as any)?.template,
           extractedFilename: filename
         });
         
@@ -521,9 +521,9 @@ export default function FormDetailPage() {
       
       // Configure PDF options with better quality
       const opt = {
-        margin: [0.5, 0.5, 0.5, 0.5],
+        margin: [0.5, 0.5, 0.5, 0.5] as [number, number, number, number],
         filename: getSafeFilename(),
-        image: { type: 'jpeg', quality: 1.0 },
+        image: { type: 'jpeg' as const, quality: 1.0 },
         html2canvas: { 
           scale: 2,
           useCORS: true,
@@ -536,7 +536,7 @@ export default function FormDetailPage() {
         jsPDF: { 
           unit: 'in', 
           format: 'letter', 
-          orientation: 'portrait',
+          orientation: 'portrait' as const,
           precision: 16,
         },
         pagebreak: { mode: ['avoid-all', 'css', 'legacy'] },
@@ -701,8 +701,8 @@ export default function FormDetailPage() {
         } else {
           // If it's a string, check if it's a code or ID
           // Try to find by ID first, then by code
-          const currency = currencies.find(c => c.id === pricingInfo.currency) || 
-                          currencies.find(c => c.code === pricingInfo.currency);
+          const currency = currencies.find(c => c.id === pricingInfo!.currency) || 
+                           currencies.find(c => c.code === pricingInfo!.currency);
           if (currency) {
             // Convert to ID (whether it was code or ID, use the found currency's ID)
             pricingInfo = {
@@ -1497,7 +1497,9 @@ export default function FormDetailPage() {
                       Currency
                     </label>
                     <select
-                      value={formData.pricingInfo?.currency || ''}
+                      value={typeof formData.pricingInfo?.currency === 'string' 
+                        ? formData.pricingInfo.currency 
+                        : (formData.pricingInfo?.currency as any)?.id || ''}
                       onChange={(e) => setFormData({
                         ...formData,
                         pricingInfo: {
@@ -1873,7 +1875,7 @@ export default function FormDetailPage() {
             <div className="rounded-lg border border-gray-200 bg-white p-6 dark:border-gray-800 dark:bg-gray-900">
               <div className="space-y-6">
                 {/* Template Preview Section - At the top for view mode */}
-                {(templateInfo || form.template) && (
+                {(templateInfo || (form as any)?.template) && (
                   <div className="rounded-lg border border-gray-200 bg-gray-50 p-4 dark:border-gray-700 dark:bg-gray-800">
                     <div className="flex items-center justify-between">
                       <div>
@@ -1895,12 +1897,12 @@ export default function FormDetailPage() {
                             </>
                           ) : (
                             <>
-                              <span className="font-medium">Template:</span> {form.template}
+                              <span className="font-medium">Template:</span> {(form as any)?.template}
                             </>
                           )}
                         </p>
                       </div>
-                      {(templateInfo || form.template) && (
+                      {(templateInfo || (form as any)?.template) && (
                         <button
                           type="button"
                           onClick={handlePreviewTemplate}

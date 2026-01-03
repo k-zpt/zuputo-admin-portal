@@ -49,7 +49,6 @@ jobs:
           key: ${{ secrets.SERVER_SSH_KEY }}
           port: ${{ secrets.SERVER_PORT }}
           source: ".next/,public/,package.json,package-lock.json"
-          excludes: "logs/"
           target: ${{ env.DEPLOY_PATH }}/
           strip_components: 0
           overwrite: true

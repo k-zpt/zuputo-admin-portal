@@ -73,7 +73,8 @@ export interface CustomerSubscription {
   [key: string]: any; // Allow for additional subscription fields
 }
 
-export interface CustomerProfile extends Customer {
+export interface CustomerProfile extends Omit<Customer, 'country'> {
+  country?: string | Country; // Can be string ID or full Country object
   subscription?: CustomerSubscription | null;
   [key: string]: any; // Allow for additional profile fields
 }

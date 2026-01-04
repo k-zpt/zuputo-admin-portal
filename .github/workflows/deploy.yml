@@ -7,7 +7,7 @@ on:
 
 env:
   APP_NAME: zuputo_admin_portal_20003
-  DEPLOY_PATH: /home/dev_admin/t_projects/admin_portal
+  DEPLOY_PATH: /var/www/zuputo/admin_portal
   NODE_VERSION: 24
 
 jobs:
@@ -51,10 +51,10 @@ jobs:
           script: |
             echo "Current user: $(whoami)"
             echo "Testing directory access..."
-            ls -la /home/dev_admin/t_projects/admin_portal
-            ls -la /home/dev_admin/t_projects/admin_portal/
-            touch /home/dev_admin/t_projects/admin_portal/test_deploy.txt
-            rm /home/dev_admin/t_projects/admin_portal/test_deploy.txt
+            ls -la /var/www/zuputo/admin_portal
+            ls -la /var/www/zuputo/admin_portal/
+            touch /var/www/zuputo/admin_portal/test_deploy.txt
+            rm /var/www/zuputo/admin_portal/test_deploy.txt
             echo "Directory access successful!"
       
       # Deploy ONLY the built files to server
@@ -66,7 +66,7 @@ jobs:
           key: ${{ secrets.SERVER_SSH_KEY }}
           port: ${{ secrets.SERVER_PORT }}
           source: ".next,public,package.json,package-lock.json"
-          target: /home/dev_admin/t_projects/admin_portal
+          target: /var/www/zuputo/admin_portal
           strip_components: 0
           overwrite: true
       

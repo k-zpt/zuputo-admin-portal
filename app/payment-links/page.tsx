@@ -45,6 +45,7 @@ export default function PaymentLinksPage() {
   const [customerSearchTerm, setCustomerSearchTerm] = useState('');
   const [isCustomerDropdownOpen, setIsCustomerDropdownOpen] = useState(false);
   const customerDropdownRef = useRef<HTMLDivElement>(null);
+  const [showEmailPreview, setShowEmailPreview] = useState(false);
 
   useEffect(() => {
     loadCountries();
@@ -104,7 +105,7 @@ export default function PaymentLinksPage() {
       // Load the payment link email template by code
       const response: ApiResponse<MessageTemplate[]> = await messageTemplateService.list({ code: 'PAYMENT_LINK' });
       const emailTemplate = response.data.find(
-        t => t.type === 'EMAIL' && t.code === 'PAYMENT_LINK'
+        t => t.type?.toUpperCase() === 'EMAIL' && t.code === 'PAYMENT_LINK'
       );
       if (emailTemplate) {
         if (emailTemplate.content) {
@@ -119,10 +120,12 @@ export default function PaymentLinksPage() {
       
       // Load the payment link notification template
       const notificationTemplate = response.data.find(
-        t => t.type === 'NOTIFICATION' && t.code === 'PAYMENT_LINK'
+        t => t.type?.toUpperCase() === 'NOTIFICATION' && t.code === 'PAYMENT_LINK'
       );
       if (notificationTemplate) {
         setNotificationTemplate(notificationTemplate);
+      } else {
+        console.log('Notification template not found. Available templates:', response.data.map(t => ({ type: t.type, code: t.code })));
       }
       
       setTemplateLoaded(true);
@@ -146,6 +149,16 @@ export default function PaymentLinksPage() {
   };
 
   const generatePaymentLink = async (): Promise<AdhocRequest> => {
+    // Calculate validUntil as 2 weeks from now, formatted as DD/MM/YYYY, HH:mm:ss
+    const futureDate = new Date(Date.now() + 14 * 24 * 60 * 60 * 1000); // 14 days = 2 weeks
+    const day = String(futureDate.getDate()).padStart(2, '0');
+    const month = String(futureDate.getMonth() + 1).padStart(2, '0');
+    const year = futureDate.getFullYear();
+    const hours = String(futureDate.getHours()).padStart(2, '0');
+    const minutes = String(futureDate.getMinutes()).padStart(2, '0');
+    const seconds = String(futureDate.getSeconds()).padStart(2, '0');
+    const validUntil = `${day}/${month}/${year}, ${hours}:${minutes}:${seconds}`;
+
     const payload: CreateAdhocRequestPayload = {
       countryId: formData.countryId,
       label: formData.label,
@@ -156,6 +169,7 @@ export default function PaymentLinksPage() {
       },
       discountProgramIds: formData.discountProgramIds.length > 0 ? formData.discountProgramIds : undefined,
       customerId: activeMethod === 'customer' ? customerData.customerId : undefined,
+      validUntil: validUntil,
     };
 
     const response: ApiResponse<AdhocRequest> = await paymentLinkService.generate(payload);
@@ -319,6 +333,101 @@ export default function PaymentLinksPage() {
 
   const supportedCurrencies = getSupportedCurrencies(formData.countryId);
 
+  // Generate email/notification preview
+  const generateEmailPreview = () => {
+    // Use a mock payment link URL for preview (since we don't have a real one yet)
+    const mockPaymentLinkUrl = `${PAYMENT_LINK_BASE_URL}/adhoc-payments/[payment-token-will-be-generated]`;
+    // Create a date 2 weeks (14 days) from now and format it like the API would return
+    const futureDate = new Date(Date.now() + 14 * 24 * 60 * 60 * 1000);
+    const day = String(futureDate.getDate()).padStart(2, '0');
+    const month = String(futureDate.getMonth() + 1).padStart(2, '0');
+    const year = futureDate.getFullYear();
+    const hours = String(futureDate.getHours()).padStart(2, '0');
+    const minutes = String(futureDate.getMinutes()).padStart(2, '0');
+    const seconds = String(futureDate.getSeconds()).padStart(2, '0');
+    const mockValidUntil = `${day}/${month}/${year}, ${hours}:${minutes}:${seconds}`;
+    
+    // Find currency code
+    const selectedCurrency = currencies.find(c => c.id === formData.currencyId);
+    const currencyCode = selectedCurrency?.code || '';
+    
+    // Determine which template to use based on method
+    let templateToUse: string;
+    let recipients: string[] = [];
+    let isNotification = false;
+    let header: string;
+    
+    if (activeMethod === 'email') {
+      // Use custom message if provided, otherwise use template
+      templateToUse = emailData.message || emailTemplate;
+      recipients = emailData.recipients.split(',').map(r => r.trim()).filter(Boolean);
+      header = emailTemplateTitle || `Payment Link: ${formData.label || '[Service Name]'}`;
+      if (emailTemplateTitle && emailTemplateTitle.includes('{{label}}')) {
+        header = emailTemplateTitle.replace(/\{\{label\}\}/g, formData.label || '[Service Name]');
+      }
+    } else if (activeMethod === 'customer') {
+      // Use notification template for customer method
+      if (!notificationTemplate) {
+        return null; // No preview if no notification template
+      }
+      isNotification = true;
+      templateToUse = notificationTemplate.content || '';
+      header = notificationTemplate.title || formData.label || '[Service Name]';
+      if (notificationTemplate.title && notificationTemplate.title.includes('{{label}}')) {
+        header = notificationTemplate.title.replace(/\{\{label\}\}/g, formData.label || '[Service Name]');
+      }
+      const customer = customers.find(c => c.id === customerData.customerId);
+      if (customer?.emailAddress) {
+        recipients = [customer.emailAddress];
+      }
+    } else {
+      templateToUse = emailTemplate;
+      header = emailTemplateTitle || `Payment Link: ${formData.label || '[Service Name]'}`;
+    }
+    
+    // Check if template contains placeholders
+    const hasPlaceholders = templateToUse.includes('{{label}}') || 
+                            templateToUse.includes('{{url}}') || 
+                            templateToUse.includes('{{price}}');
+    
+    let content: string;
+    if (hasPlaceholders) {
+      if (isNotification) {
+        // For notifications, use the same replacement logic as in handleSubmit
+        content = templateToUse;
+        content = content.replace(/\{\{label\}\}/g, formData.label || '[Service Name]');
+        content = content.replace(/\{\{url\}\}/g, mockPaymentLinkUrl);
+        content = content.replace(/\{\{validUntil\}\}/g, formatDate(mockValidUntil));
+        content = content.replace(/\{\{price\}\}/g, formatNumber(formData.price || '0'));
+        content = content.replace(/\{\{currency\}\}/g, currencyCode);
+        if (formData.description) {
+          content = content.replace(/\{\{description\}\}/g, formData.description);
+        }
+        // Convert <br> back to \n for notification content (if any)
+        content = content.replace(/<br\s*\/?>/gi, '\n');
+      } else {
+        // For emails, use renderEmailTemplate
+        content = renderEmailTemplate(templateToUse, {
+          label: formData.label || '[Service Name]',
+          description: formData.description || '',
+          url: mockPaymentLinkUrl,
+          validUntil: mockValidUntil,
+          price: formData.price || '0',
+          currency: currencyCode,
+        });
+      }
+    } else {
+      content = templateToUse;
+    }
+    
+    return {
+      subject: header,
+      content,
+      recipients,
+      isNotification,
+    };
+  };
+
   // Tab content for Copy method
   const copyTabContent = (
     <div className="space-y-4">
@@ -390,15 +499,25 @@ export default function PaymentLinksPage() {
             <label className="block text-sm font-medium text-gray-700 dark:text-gray-300">
               Email Template
             </label>
-            <button
-              type="button"
-              onClick={() => {
-                setEmailData({ ...emailData, message: '' });
-              }}
-              className="text-xs text-blue-600 hover:text-blue-700 dark:text-blue-400 dark:hover:text-blue-300"
-            >
-              Reset to default
-            </button>
+            <div className="flex items-center gap-2">
+              <button
+                type="button"
+                onClick={() => setShowEmailPreview(true)}
+                disabled={!formData.label || !formData.price || !formData.currencyId}
+                className="text-xs text-blue-600 hover:text-blue-700 dark:text-blue-400 dark:hover:text-blue-300 disabled:text-gray-400 disabled:cursor-not-allowed"
+              >
+                Preview
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  setEmailData({ ...emailData, message: '' });
+                }}
+                className="text-xs text-blue-600 hover:text-blue-700 dark:text-blue-400 dark:hover:text-blue-300"
+              >
+                Reset to default
+              </button>
+            </div>
           </div>
           <textarea
             value={emailData.message || emailTemplate}
@@ -440,9 +559,20 @@ export default function PaymentLinksPage() {
   // Tab content for Customer method
   const customerTabContent = (
     <div className="space-y-4">
-      <p className="text-sm text-gray-600 dark:text-gray-400">
-        Generate a payment link and send it directly to a customer via the app.
-      </p>
+      <div className="flex items-center justify-between">
+        <p className="text-sm text-gray-600 dark:text-gray-400">
+          Generate a payment link and send it directly to a customer via the app.
+        </p>
+        {notificationTemplate && (
+          <button
+            type="button"
+            onClick={() => setShowEmailPreview(true)}
+            className="text-xs text-blue-600 hover:text-blue-700 dark:text-blue-400 dark:hover:text-blue-300"
+          >
+            Preview
+          </button>
+        )}
+      </div>
       <div className="relative" ref={customerDropdownRef}>
         <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
           Customer *
@@ -727,6 +857,100 @@ export default function PaymentLinksPage() {
             {getSubmitButtonText()}
           </button>
         </div>
+
+        {/* Email/Notification Preview Modal */}
+        {showEmailPreview && (() => {
+          const preview = generateEmailPreview();
+          if (!preview) {
+            return null; // No preview available
+          }
+          const isNotification = preview.isNotification;
+          return (
+            <div 
+              className="fixed inset-0 z-50 flex items-center justify-center bg-black bg-opacity-50 p-4"
+              onClick={() => setShowEmailPreview(false)}
+            >
+              <div 
+                className="relative w-full max-w-2xl max-h-[90vh] overflow-y-auto rounded-lg border border-gray-200 bg-white shadow-xl dark:border-gray-800 dark:bg-gray-900"
+                onClick={(e) => e.stopPropagation()}
+              >
+                {/* Modal Header */}
+                <div className="sticky top-0 flex items-center justify-between border-b border-gray-200 bg-gray-50 px-6 py-4 dark:border-gray-700 dark:bg-gray-800">
+                  <h2 className="text-xl font-semibold text-gray-900 dark:text-white">
+                    {isNotification ? 'Notification Preview' : 'Email Preview'}
+                  </h2>
+                  <button
+                    type="button"
+                    onClick={() => setShowEmailPreview(false)}
+                    className="rounded-lg p-1 text-gray-400 hover:bg-gray-200 hover:text-gray-600 dark:hover:bg-gray-700 dark:hover:text-gray-300"
+                  >
+                    <svg className="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+                      <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                    </svg>
+                  </button>
+                </div>
+
+                {/* Modal Content */}
+                <div className="p-6 space-y-6">
+                  {/* Header */}
+                  <div className="space-y-2 border-b border-gray-200 pb-4 dark:border-gray-700">
+                    {!isNotification && (
+                      <div className="flex items-start gap-2">
+                        <span className="text-sm font-medium text-gray-500 dark:text-gray-400 min-w-[80px]">To:</span>
+                        <span className="text-sm text-gray-900 dark:text-white">
+                          {preview.recipients.length > 0 
+                            ? preview.recipients.join(', ') 
+                            : <span className="text-gray-400 italic">No recipients entered</span>}
+                        </span>
+                      </div>
+                    )}
+                    <div className="flex items-start gap-2">
+                      <span className="text-sm font-medium text-gray-500 dark:text-gray-400 min-w-[80px]">
+                        {isNotification ? 'Header:' : 'Subject:'}
+                      </span>
+                      <span className="text-sm text-gray-900 dark:text-white font-medium">
+                        {preview.subject}
+                      </span>
+                    </div>
+                  </div>
+
+                  {/* Body */}
+                  <div className="space-y-2">
+                    <div className="text-sm font-medium text-gray-500 dark:text-gray-400 mb-2">
+                      {isNotification ? 'Notification Content:' : 'Email Body:'}
+                    </div>
+                    <div className="rounded-lg border border-gray-200 bg-gray-50 p-4 dark:border-gray-700 dark:bg-gray-800">
+                      <div 
+                        className="prose prose-sm max-w-none text-gray-900 dark:text-gray-100 whitespace-pre-wrap"
+                        dangerouslySetInnerHTML={{ 
+                          __html: preview.content.replace(/\n/g, '<br>') 
+                        }}
+                      />
+                    </div>
+                  </div>
+
+                  {/* Info Note */}
+                  <div className="rounded-lg border border-blue-200 bg-blue-50 p-3 dark:border-blue-800 dark:bg-blue-900/20">
+                    <p className="text-xs text-blue-800 dark:text-blue-200">
+                      <strong>Note:</strong> This is a preview. The actual payment link URL and expiration date will be generated when you submit the form.
+                    </p>
+                  </div>
+                </div>
+
+                {/* Modal Footer */}
+                <div className="sticky bottom-0 flex justify-end gap-3 border-t border-gray-200 bg-gray-50 px-6 py-4 dark:border-gray-700 dark:bg-gray-800">
+                  <button
+                    type="button"
+                    onClick={() => setShowEmailPreview(false)}
+                    className="rounded-lg border border-gray-300 bg-white px-4 py-2 text-sm font-medium text-gray-700 hover:bg-gray-50 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-200 dark:hover:bg-gray-700"
+                  >
+                    Close
+                  </button>
+                </div>
+              </div>
+            </div>
+          );
+        })()}
       </div>
     </AdminLayout>
   );

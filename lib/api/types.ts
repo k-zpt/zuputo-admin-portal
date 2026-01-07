@@ -355,6 +355,7 @@ export interface CreateAdhocRequestPayload {
   pricingInfo: PricingInfo;
   discountProgramIds?: string[];
   customerId?: string;
+  validUntil?: string; // Optional: if provided, sets expiration date (format: ISO string or DD/MM/YYYY, HH:mm:ss)
 }
 
 export interface UpdateAdhocRequestPayload {
@@ -424,6 +425,7 @@ export interface ServiceRequestInvoice {
   id: string;
   name: string;
   number: string;
+  status?: string; // Payment status: PAID, UNPAID, CANCELLED
   billedTo: Customer;
   items: ServiceRequestInvoiceItem[];
   pricing: {

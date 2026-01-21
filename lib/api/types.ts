@@ -355,7 +355,7 @@ export interface CreateAdhocRequestPayload {
   pricingInfo: PricingInfo;
   discountProgramIds?: string[];
   customerId?: string;
-  validUntil?: string; // Optional: if provided, sets expiration date (format: ISO string or DD/MM/YYYY, HH:mm:ss)
+  validUntil?: string | number; // Accepts ISO/date string or epoch ms (backend expects an exact date)
 }
 
 export interface UpdateAdhocRequestPayload {

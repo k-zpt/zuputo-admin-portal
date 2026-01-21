@@ -940,6 +940,7 @@ export default function PaymentLinksPage() {
         setInvoiceData({
           countryId: '',
           currencyId: '',
+          currencyCode: '',
           tax: '',
           discountPercentage: '',
           amountPaid: '',

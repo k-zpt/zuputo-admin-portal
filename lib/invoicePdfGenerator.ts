@@ -379,7 +379,7 @@ export async function generateInvoicePdf(
         onclone: (clonedDoc: Document) => {
           // Ensure all styles are preserved in the cloned document
           const clonedElement = clonedDoc.querySelector('body > div');
-          if (clonedElement) {
+          if (clonedElement instanceof HTMLElement) {
             clonedElement.style.width = '816px';
             clonedElement.style.margin = '0';
             clonedElement.style.padding = '0';

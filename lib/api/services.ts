@@ -15,6 +15,7 @@ import type {
   UpdateAdhocRequestPayload,
   PaymentResponse,
   SendEmailPayload,
+  CreateOfflineInvoicePayload,
   SubscriptionPlan,
   CreateSubscriptionPlanPayload,
   UpdateSubscriptionPlanPayload,
@@ -182,6 +183,66 @@ export const paymentLinkService = {
 export const notifierService = {
   sendEmail: async (data: SendEmailPayload) => {
     return apiClient.post<{ success: boolean }>(API_ENDPOINTS.sendEmail, data);
+  },
+  
+  // New mail compose API with bcc/cc support (uses FormData)
+  composeEmail: async (data: {
+    recipients: string[];
+    subject: string;
+    content: string;
+    format?: string;
+    bccRecipients?: string[];
+    ccRecipients?: string[];
+    attachments?: Array<{ filename: string; content: string; contentType: string }>;
+  }) => {
+    const formData = new FormData();
+    
+    // Add recipients (can be multiple)
+    data.recipients.forEach(recipient => {
+      formData.append('recipients', recipient);
+    });
+    
+    formData.append('subject', data.subject);
+    formData.append('content', data.content);
+    formData.append('format', data.format || 'html');
+    
+    // Add bcc recipients if provided
+    if (data.bccRecipients && data.bccRecipients.length > 0) {
+      data.bccRecipients.forEach(bcc => {
+        formData.append('bcc_recipients', bcc);
+      });
+    }
+    
+    // Add cc recipients if provided
+    if (data.ccRecipients && data.ccRecipients.length > 0) {
+      data.ccRecipients.forEach(cc => {
+        formData.append('cc_recipients', cc);
+      });
+    }
+    
+    // Add attachments if provided
+    if (data.attachments && data.attachments.length > 0) {
+      data.attachments.forEach(attachment => {
+        // Convert base64 to blob
+        const byteCharacters = atob(attachment.content);
+        const byteNumbers = new Array(byteCharacters.length);
+        for (let i = 0; i < byteCharacters.length; i++) {
+          byteNumbers[i] = byteCharacters.charCodeAt(i);
+        }
+        const byteArray = new Uint8Array(byteNumbers);
+        const blob = new Blob([byteArray], { type: attachment.contentType });
+        formData.append('attachments', blob, attachment.filename);
+      });
+    }
+    
+    return apiClient.post<{ success: boolean }>(API_ENDPOINTS.mailCompose, formData);
+  },
+};
+
+// Offline Invoice services
+export const offlineInvoiceService = {
+  create: async (data: CreateOfflineInvoicePayload) => {
+    return apiClient.post<{ success: boolean }>(API_ENDPOINTS.offlineInvoices, data);
   },
 };
 

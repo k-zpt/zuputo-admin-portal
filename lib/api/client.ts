@@ -24,12 +24,25 @@ class ApiClient {
     });
 
     if (!response.ok) {
-      const errorData = await response.json().catch(() => ({}));
-      const error = new Error(
-        errorData.msg || `API request failed: ${response.statusText}`
-      ) as Error & { response?: any; errorData?: any };
+      let errorData: any = {};
+      try {
+        const contentType = response.headers.get('content-type');
+        if (contentType && contentType.includes('application/json')) {
+          errorData = await response.json();
+        } else {
+          const text = await response.text();
+          errorData = { msg: text || response.statusText };
+        }
+      } catch (parseError) {
+        // If we can't parse the error response, use status text
+        errorData = { msg: response.statusText || 'Unknown error' };
+      }
+      
+      const errorMessage = errorData.msg || errorData.message || `API request failed: ${response.statusText} (${response.status})`;
+      const error = new Error(errorMessage) as Error & { response?: any; errorData?: any; status?: number };
       error.response = response;
       error.errorData = errorData;
+      error.status = response.status;
       throw error;
     }
 
@@ -51,11 +64,48 @@ class ApiClient {
     return this.request<T>(endpoint + queryString);
   }
 
-  async post<T>(endpoint: string, data?: unknown): Promise<ApiResponse<T>> {
-    return this.request<T>(endpoint, {
+  async post<T>(endpoint: string, data?: FormData | unknown): Promise<ApiResponse<T>> {
+    // For file uploads (FormData), don't set Content-Type header
+    // Let the browser set it with the boundary for multipart/form-data
+    const isFormData = data instanceof FormData;
+    const cleanEndpoint = endpoint.startsWith('/') ? endpoint.slice(1) : endpoint;
+    const url = `${this.baseUrl}/${cleanEndpoint}`;
+    
+    const headers: HeadersInit = {};
+    if (!isFormData) {
+      headers['Content-Type'] = 'application/json';
+    }
+    
+    const response = await fetch(url, {
       method: 'POST',
-      body: data ? JSON.stringify(data) : undefined,
+      headers,
+      body: isFormData ? data : (data ? JSON.stringify(data) : undefined),
     });
+
+    if (!response.ok) {
+      let errorData: any = {};
+      try {
+        const contentType = response.headers.get('content-type');
+        if (contentType && contentType.includes('application/json')) {
+          errorData = await response.json();
+        } else {
+          const text = await response.text();
+          errorData = { msg: text || response.statusText };
+        }
+      } catch (parseError) {
+        // If we can't parse the error response, use status text
+        errorData = { msg: response.statusText || 'Unknown error' };
+      }
+      
+      const errorMessage = errorData.msg || errorData.message || `API request failed: ${response.statusText} (${response.status})`;
+      const error = new Error(errorMessage) as Error & { response?: any; errorData?: any; status?: number };
+      error.response = response;
+      error.errorData = errorData;
+      error.status = response.status;
+      throw error;
+    }
+
+    return response.json();
   }
 
   async patch<T>(endpoint: string, data?: unknown): Promise<ApiResponse<T>> {
@@ -84,12 +134,25 @@ class ApiClient {
     });
 
     if (!response.ok) {
-      const errorData = await response.json().catch(() => ({}));
-      const error = new Error(
-        errorData.msg || `API request failed: ${response.statusText}`
-      ) as Error & { response?: any; errorData?: any };
+      let errorData: any = {};
+      try {
+        const contentType = response.headers.get('content-type');
+        if (contentType && contentType.includes('application/json')) {
+          errorData = await response.json();
+        } else {
+          const text = await response.text();
+          errorData = { msg: text || response.statusText };
+        }
+      } catch (parseError) {
+        // If we can't parse the error response, use status text
+        errorData = { msg: response.statusText || 'Unknown error' };
+      }
+      
+      const errorMessage = errorData.msg || errorData.message || `API request failed: ${response.statusText} (${response.status})`;
+      const error = new Error(errorMessage) as Error & { response?: any; errorData?: any; status?: number };
       error.response = response;
       error.errorData = errorData;
+      error.status = response.status;
       throw error;
     }
 

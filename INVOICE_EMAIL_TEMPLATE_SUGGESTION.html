@@ -1,0 +1,25 @@
+Dear {{customer_name}},<br><br>
+
+Please find your attached invoice, detailing all covered items.<br><br>
+
+<strong>Balance Due:</strong> {{currency_code}} {{balance_due}}<br><br>
+
+<strong><u>Payment Options</u></strong><br><br>
+
+<strong>• Option 1: Pay Online</strong><br>
+Click the link below to pay securely online:<br>
+<a href="{{url}}">{{url}}</a><br><br>
+
+<strong>• Option 2: Bank Transfer</strong><br>
+Use the account details in the attached invoice to make a direct bank transfer.<br><br>
+
+{{#notes}}
+<strong>Note:</strong> {{notes}}<br><br>
+{{/notes}}
+
+<small>This payment link is valid until {{validUntil}}.</small><br><br>
+
+Thank you for choosing Zuputo.<br><br>
+
+Best,<br>
+The Zuputo Team<br>

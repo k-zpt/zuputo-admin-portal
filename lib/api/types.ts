@@ -381,6 +381,13 @@ export interface SendEmailPayload {
   recipients: string[];
   subject: string;
   content: string;
+  cc?: string[];
+  bcc?: string[];
+  attachments?: Array<{
+    filename: string;
+    content: string; // Base64 encoded file content
+    contentType: string; // e.g., 'application/pdf'
+  }>;
 }
 
 // Service Request types
@@ -515,5 +522,45 @@ export interface UpdateDiscountProgramPayload {
   validUntil?: string;
   perCustomerAvailLimit?: number;
   totalCustomerAvailLimit?: number;
+}
+
+// Offline Invoice types
+export interface InvoiceItemPayload {
+  date: string | number; // epoch ms or ISO string
+  service: string;
+  description: string;
+  quantity: number;
+  rate: number;
+}
+
+export interface CustomerInfoPayload {
+  name: string;
+  address: string;
+  emailAddress: string;
+}
+
+export interface OfflineInvoicePayload {
+  date: string | number;
+  validUntil: string | number;
+  terms?: string;
+  items: InvoiceItemPayload[];
+  notes?: string;
+  tax: number;
+  currencyId: string;
+  countryId: string;
+  customerInfo: CustomerInfoPayload;
+}
+
+export interface EmailInfoPayload {
+  content: string;
+  recipients: string[];
+  bccRecipients?: string[];
+  ccRecipients?: string[];
+  subject?: string;
+}
+
+export interface CreateOfflineInvoicePayload {
+  invoiceInfo: OfflineInvoicePayload;
+  emailInfo: EmailInfoPayload;
 }
 

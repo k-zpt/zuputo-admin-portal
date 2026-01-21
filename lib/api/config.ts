@@ -45,6 +45,10 @@ export const API_ENDPOINTS = {
   
   // Notifier
   sendEmail: '/api/v2/notifier/email',
+  // Mail Compose (new API with bcc/cc support)
+  mailCompose: '/api/v2/mail/compose',
+  // Offline Invoices
+  offlineInvoices: '/api/v2/offline-invoices',
   
   // Notifications
   notifications: '/api/v1/notifications',

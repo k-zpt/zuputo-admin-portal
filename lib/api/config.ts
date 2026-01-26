@@ -1,6 +1,9 @@
 export const API_BASE_URL = process.env.NEXT_PUBLIC_API_BASE_URL || 'http://127.0.0.1:8000';
 export const PAYMENT_LINK_BASE_URL = process.env.NEXT_PUBLIC_PAYMENT_LINK_BASE_URL || 'http://localhost:8001';
 
+// Application configuration
+export const FINANCE_EMAIL = process.env.NEXT_PUBLIC_FINANCE_EMAIL || 'finance@zuputo.com';
+
 export const API_ENDPOINTS = {
   // Currencies
   currencies: '/api/v1/currencies',

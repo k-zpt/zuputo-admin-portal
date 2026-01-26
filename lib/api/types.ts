@@ -546,6 +546,8 @@ export interface OfflineInvoicePayload {
   items: InvoiceItemPayload[];
   notes?: string;
   tax: number;
+  discountRate: number;
+  amountPaid: number;
   currencyId: string;
   countryId: string;
   customerInfo: CustomerInfoPayload;

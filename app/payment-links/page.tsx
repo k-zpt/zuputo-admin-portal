@@ -4,7 +4,7 @@ import { AdminLayout } from "@/components/AdminLayout";
 import { Tabs } from "@/components/Tabs";
 import { paymentLinkService, countryService, currencyService, customerService, notifierService, messageTemplateService, notificationService, offlineInvoiceService } from "@/lib/api/services";
 import { DEFAULT_PAYMENT_LINK_EMAIL_TEMPLATE, renderEmailTemplate, formatNumber, formatDate } from "@/lib/emailTemplates";
-import { PAYMENT_LINK_BASE_URL } from "@/lib/api/config";
+import { PAYMENT_LINK_BASE_URL, FINANCE_EMAIL } from "@/lib/api/config";
 import { useState, useEffect, useRef } from "react";
 import type { AdhocRequest, CreateAdhocRequestPayload, ApiResponse, Country, Currency, Customer, MessageTemplate, CreateOfflineInvoicePayload } from "@/lib/api/types";
 
@@ -166,7 +166,7 @@ export default function PaymentLinksPage() {
   const [emailData, setEmailData] = useState({
     recipients: [] as string[],
     cc: [] as string[],
-    bcc: ['finance@zuputo.com'] as string[], // Prepopulate with fixed BCC
+    bcc: [FINANCE_EMAIL] as string[], // Prepopulate with fixed BCC
     message: '',
   });
   
@@ -200,7 +200,7 @@ export default function PaymentLinksPage() {
   useEffect(() => {
     if (activeMethod !== 'email') return;
 
-    const financeEmail = 'finance@zuputo.com';
+    const financeEmail = FINANCE_EMAIL;
 
     // Keep only valid emails
     let recipients = emailData.recipients.filter(isValidEmail);
@@ -400,19 +400,25 @@ export default function PaymentLinksPage() {
         return sum + (qty * rate);
       }, 0);
       
-      // subtotal = total_item_price + tax
-      const taxAmount = parseFloat(invoiceData.tax) || 0;
-      const subtotal = totalItemPrice + taxAmount;
-      
-      // discount_amount = subtotal * (discountPercentage / 100)
+      // discount_amount = total_item_price * (discountPercentage / 100)
+      // Applied BEFORE tax
       const discountPercent = parseFloat(invoiceData.discountPercentage) || 0;
-      const discountAmount = subtotal * (discountPercent / 100);
+      const discountAmount = totalItemPrice * (discountPercent / 100);
+      
+      // after_discount = total_item_price - discount
+      const afterDiscount = totalItemPrice - discountAmount;
+      
+      // tax (fixed amount)
+      const taxAmount = parseFloat(invoiceData.tax) || 0;
+      
+      // subtotal = after_discount + tax
+      const subtotal = afterDiscount + taxAmount;
       
       // amount_paid
       const amountPaid = parseFloat(invoiceData.amountPaid) || 0;
       
-      // balance = subtotal - discount - amount_paid
-      const total = subtotal - discountAmount - amountPaid;
+      // balance = subtotal - amount_paid
+      const total = subtotal - amountPaid;
 
       // For invoice, use the total as the price
       payload = {
@@ -625,6 +631,8 @@ export default function PaymentLinksPage() {
               })),
               notes: invoiceData.notes || undefined,
               tax: parseFloat(invoiceData.tax) || 0,
+              discountRate: (parseFloat(invoiceData.discountPercentage) || 0) / 100,
+              amountPaid: parseFloat(invoiceData.amountPaid) || 0,
               currencyId: invoiceData.currencyId,
               countryId: invoiceData.countryId,
               customerInfo: {
@@ -858,7 +866,7 @@ export default function PaymentLinksPage() {
         discountProgramIds: [],
       });
       }
-      setEmailData({ recipients: [], cc: [], bcc: ['finance@zuputo.com'], message: '' });
+      setEmailData({ recipients: [], cc: [], bcc: [FINANCE_EMAIL], message: '' });
       setCustomerData({ customerId: '' });
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to generate payment link');
@@ -923,16 +931,21 @@ export default function PaymentLinksPage() {
     return parseFloat(invoiceData.tax) || 0;
   };
 
-  // subtotal = total_item_price + tax
-  const calculateInvoiceSubtotal = () => {
-    return calculateInvoiceItemTotal() + calculateInvoiceTax();
+  // discount_amount = total_item_price * (discountPercentage / 100)
+  // Applied BEFORE tax
+  const calculateInvoiceDiscount = () => {
+    const totalItemPrice = calculateInvoiceItemTotal();
+    const discountPercent = parseFloat(invoiceData.discountPercentage) || 0;
+    return totalItemPrice * (discountPercent / 100);
   };
 
-  // discount_amount = subtotal * (discountPercentage / 100)
-  const calculateInvoiceDiscount = () => {
-    const subtotal = calculateInvoiceSubtotal();
-    const discountPercent = parseFloat(invoiceData.discountPercentage) || 0;
-    return subtotal * (discountPercent / 100);
+  // subtotal = (total_item_price - discount) + tax
+  // Discount is applied before tax
+  const calculateInvoiceSubtotal = () => {
+    const totalItemPrice = calculateInvoiceItemTotal();
+    const discount = calculateInvoiceDiscount();
+    const tax = calculateInvoiceTax();
+    return (totalItemPrice - discount) + tax;
   };
 
   const calculateInvoiceAmountPaid = () => {
@@ -940,11 +953,12 @@ export default function PaymentLinksPage() {
   };
 
   // balance = subtotal - discount - amount_paid
+  // balance = subtotal - amount_paid
+  // Where subtotal = (total_item_price - discount) + tax
   const calculateInvoiceTotal = () => {
     const subtotal = calculateInvoiceSubtotal();
-    const discount = calculateInvoiceDiscount();
     const amountPaid = calculateInvoiceAmountPaid();
-    return subtotal - discount - amountPaid;
+    return subtotal - amountPaid;
   };
 
   // Generate email/notification preview
@@ -1228,7 +1242,7 @@ export default function PaymentLinksPage() {
             emails={emailData.bcc}
             onChange={(emails) => setEmailData({ ...emailData, bcc: emails })}
             placeholder="Type email and press Enter or comma"
-            fixedEmails={['finance@zuputo.com']}
+            fixedEmails={[FINANCE_EMAIL]}
             label="BCC"
           />
         </div>
@@ -1253,7 +1267,7 @@ export default function PaymentLinksPage() {
             <button
               type="button"
               onClick={() => {
-                  setEmailData({ ...emailData, message: '', cc: [], bcc: ['finance@zuputo.com'] });
+                  setEmailData({ ...emailData, message: '', cc: [], bcc: [FINANCE_EMAIL] });
               }}
               className="text-xs text-blue-600 hover:text-blue-700 dark:text-blue-400 dark:hover:text-blue-300"
             >

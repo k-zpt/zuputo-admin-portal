@@ -5,16 +5,6 @@ import { Tabs } from "@/components/Tabs";
 import { paymentLinkService, countryService, currencyService, customerService, notifierService, messageTemplateService, notificationService, offlineInvoiceService } from "@/lib/api/services";
 import { DEFAULT_PAYMENT_LINK_EMAIL_TEMPLATE, renderEmailTemplate, formatNumber, formatDate } from "@/lib/emailTemplates";
 import { PAYMENT_LINK_BASE_URL } from "@/lib/api/config";
-// Dynamic import for browser-only PDF generation
-const generateInvoicePdf = async (templatePath: string, invoiceData: any) => {
-  const { generateInvoicePdf: generatePdf } = await import("@/lib/invoicePdfGenerator");
-  return generatePdf(templatePath, invoiceData);
-};
-
-const blobToBase64 = async (blob: Blob) => {
-  const { blobToBase64: convertBlob } = await import("@/lib/invoicePdfGenerator");
-  return convertBlob(blob);
-};
 import { useState, useEffect, useRef } from "react";
 import type { AdhocRequest, CreateAdhocRequestPayload, ApiResponse, Country, Currency, Customer, MessageTemplate, CreateOfflineInvoicePayload } from "@/lib/api/types";
 
@@ -500,53 +490,6 @@ export default function PaymentLinksPage() {
           currencyCode = selectedCurrency?.code || '';
         }
         
-        // Generate PDF attachment for invoices
-        let attachments: Array<{ filename: string; content: string; contentType: string }> | undefined;
-        
-        if (paymentType === 'INVOICE') {
-          try {
-            // Generate invoice PDF
-            const invoicePdfData = {
-              invoiceNumber: `INV-${Date.now()}`,
-              date: new Date().toLocaleDateString(),
-              customerName: invoiceData.billTo.name,
-              customerEmail: invoiceData.billTo.email,
-              customerAddress: invoiceData.billTo.address,
-              dueDate: invoiceData.dueDate ? new Date(invoiceData.dueDate).toLocaleDateString() : '',
-              notes: invoiceData.notes,
-              lineItems: invoiceData.lineItems.map(item => ({
-                date: item.date,
-                service: item.service,
-                description: item.description,
-                qty: item.qty,
-                rate: item.rate,
-              })),
-              subtotal: calculateInvoiceSubtotal(),
-              tax: calculateInvoiceTax(),
-              discountPercentage: parseFloat(invoiceData.discountPercentage) || 0,
-              discountAmount: calculateInvoiceDiscount(),
-              amountPaid: calculateInvoiceAmountPaid(),
-              total: calculateInvoiceTotal(),
-              currency: currencyCode,
-              paymentLink: paymentLinkUrl,
-              validUntil: link.validUntil,
-              terms: invoiceData.terms,
-            };
-            
-            const pdfBlob = await generateInvoicePdf('/invoice-template-updated.docx', invoicePdfData);
-            const pdfBase64 = await blobToBase64(pdfBlob);
-            
-            attachments = [{
-              filename: `invoice-${invoicePdfData.invoiceNumber}.pdf`,
-              content: pdfBase64,
-              contentType: 'application/pdf',
-            }];
-          } catch (err) {
-            console.error('Failed to generate invoice PDF:', err);
-            setError('Failed to generate invoice PDF. Email sent without attachment.');
-          }
-        }
-        
         // Helper function to strip HTML document structure tags (DOCTYPE, html, head, body) from email templates
         const stripHtmlDocumentTags = (html: string): string => {
           return html
@@ -713,7 +656,7 @@ export default function PaymentLinksPage() {
             attachments,
         });
         
-          setSuccess(`Payment link generated and sent via email to ${recipients.length} recipient(s)!${attachments ? ' (with PDF attachment)' : ''}`);
+          setSuccess(`Payment link generated and sent via email to ${recipients.length} recipient(s)!`);
         }
       } else if (activeMethod === 'customer') {
         // Customer ID is already included in the initial POST call
@@ -740,53 +683,6 @@ export default function PaymentLinksPage() {
           price = formData.price;
         const selectedCurrency = currencies.find(c => c.id === formData.currencyId);
           currencyCode = selectedCurrency?.code || '';
-        }
-        
-        // Generate PDF attachment for invoices
-        let attachments: Array<{ filename: string; content: string; contentType: string }> | undefined;
-        
-        if (paymentType === 'INVOICE' && customer?.emailAddress) {
-          try {
-            // Generate invoice PDF
-            const invoicePdfData = {
-              invoiceNumber: `INV-${Date.now()}`,
-              date: new Date().toLocaleDateString(),
-              customerName: invoiceData.billTo.name || customerName,
-              customerEmail: invoiceData.billTo.email || customer.emailAddress,
-              customerAddress: invoiceData.billTo.address,
-              dueDate: invoiceData.dueDate ? new Date(invoiceData.dueDate).toLocaleDateString() : '',
-              notes: invoiceData.notes,
-              lineItems: invoiceData.lineItems.map(item => ({
-                date: item.date,
-                service: item.service,
-                description: item.description,
-                qty: item.qty,
-                rate: item.rate,
-              })),
-              subtotal: calculateInvoiceSubtotal(),
-              tax: calculateInvoiceTax(),
-              discountPercentage: parseFloat(invoiceData.discountPercentage) || 0,
-              discountAmount: calculateInvoiceDiscount(),
-              amountPaid: calculateInvoiceAmountPaid(),
-              total: calculateInvoiceTotal(),
-              currency: currencyCode,
-              paymentLink: paymentLinkUrl,
-              validUntil: link.validUntil,
-              terms: invoiceData.terms,
-            };
-            
-            const pdfBlob = await generateInvoicePdf('/invoice-template-updated.docx', invoicePdfData);
-            const pdfBase64 = await blobToBase64(pdfBlob);
-            
-            attachments = [{
-              filename: `invoice-${invoicePdfData.invoiceNumber}.pdf`,
-              content: pdfBase64,
-              contentType: 'application/pdf',
-            }];
-          } catch (err) {
-            console.error('Failed to generate invoice PDF:', err);
-            setError('Failed to generate invoice PDF. Email sent without attachment.');
-          }
         }
         
         // 1. Create payment link (already done above)
@@ -918,7 +814,6 @@ export default function PaymentLinksPage() {
             recipients: [customer.emailAddress],
             subject: emailSubject,
             content: formattedEmailContent,
-              attachments,
             });
           } else {
             // For adhoc payments, use new compose API
@@ -927,12 +822,11 @@ export default function PaymentLinksPage() {
               subject: emailSubject,
               content: formattedEmailContent,
               format: 'html',
-              attachments,
             });
           }
         }
         
-        setSuccess(`Payment link generated and sent to ${customerName} via app!${attachments ? ' (with PDF attachment)' : ''}`);
+        setSuccess(`Payment link generated and sent to ${customerName} via app!`);
       }
       
       // Reset form

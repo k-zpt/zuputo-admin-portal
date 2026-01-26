@@ -157,7 +157,6 @@ export default function PaymentLinksPage() {
       email: '',
       address: '',
     },
-    terms: '',
     notes: '',
     lineItems: [{ date: '', service: '', description: '', qty: '1', rate: '' }] as InvoiceLineItem[],
   });
@@ -548,7 +547,7 @@ export default function PaymentLinksPage() {
               customer_address: invoiceData.billTo.address,
               due_date: invoiceData.dueDate ? new Date(invoiceData.dueDate).toLocaleDateString() : '',
               notes: invoiceData.notes,
-              terms: invoiceData.terms,
+              terms: calculateTerms(),
               subtotal: formatNumber(calculateInvoiceSubtotal()),
               tax: formatNumber(calculateInvoiceTax()),
               discount_percentage: invoiceData.discountPercentage || '0',
@@ -621,7 +620,7 @@ export default function PaymentLinksPage() {
             invoiceInfo: {
               date: invoiceDate.getTime(),
               validUntil: validUntilDate.getTime(),
-              terms: invoiceData.terms || undefined,
+              terms: calculateTerms() || undefined,
               items: invoiceData.lineItems.map(item => ({
                 date: item.date ? new Date(item.date).getTime() : invoiceDate.getTime(),
                 service: item.service,
@@ -782,7 +781,7 @@ export default function PaymentLinksPage() {
                 customer_address: invoiceData.billTo.address,
                 due_date: invoiceData.dueDate ? new Date(invoiceData.dueDate).toLocaleDateString() : '',
                 notes: invoiceData.notes,
-                terms: invoiceData.terms,
+                terms: calculateTerms(),
                 subtotal: formatNumber(calculateInvoiceSubtotal()),
                 tax: formatNumber(calculateInvoiceTax()),
                 discount_percentage: invoiceData.discountPercentage || '0',
@@ -852,7 +851,6 @@ export default function PaymentLinksPage() {
             email: '',
             address: '',
           },
-          terms: '',
           notes: '',
           lineItems: [{ date: '', service: '', description: '', qty: '1', rate: '' }],
         });
@@ -950,6 +948,33 @@ export default function PaymentLinksPage() {
 
   const calculateInvoiceAmountPaid = () => {
     return parseFloat(invoiceData.amountPaid) || 0;
+  };
+
+  // Calculate terms from due date: "Net X days" where X = days from today to due date
+  const calculateTerms = (): string => {
+    if (!invoiceData.dueDate) {
+      return '';
+    }
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+    const dueDate = new Date(invoiceData.dueDate);
+    dueDate.setHours(0, 0, 0, 0);
+    
+    // Calculate difference in days
+    const diffTime = dueDate.getTime() - today.getTime();
+    const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24));
+    
+    // Only calculate if due date is today or in the future
+    if (diffDays >= 0) {
+      // Special case: same day (0 days) = "Due Upon Receipt"
+      if (diffDays === 0) {
+        return 'Due Upon Receipt';
+      }
+      // Handle singular/plural: "day" for 1, "days" for 2+
+      const dayText = diffDays === 1 ? 'day' : 'days';
+      return `Net ${diffDays} ${dayText}`;
+    }
+    return '';
   };
 
   // balance = subtotal - discount - amount_paid
@@ -1133,7 +1158,7 @@ export default function PaymentLinksPage() {
             customer_address: invoiceData.billTo.address || '',
             due_date: invoiceData.dueDate ? new Date(invoiceData.dueDate).toLocaleDateString() : '',
             notes: invoiceData.notes,
-            terms: invoiceData.terms,
+            terms: calculateTerms(),
             subtotal: formatNumber(subtotal),
             tax: formatNumber(tax),
             discount_percentage: invoiceData.discountPercentage || '0',
@@ -1961,29 +1986,6 @@ export default function PaymentLinksPage() {
                     />
                   </div>
                 </div>
-              </div>
-
-              {/* Terms Section */}
-              <div className="mb-6">
-                <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-1">
-                  Terms (Optional)
-                </label>
-                <textarea
-                  value={invoiceData.terms}
-                  onChange={(e) => {
-                    const value = e.target.value;
-                    if (value.length <= 20) {
-                      setInvoiceData({ ...invoiceData, terms: value });
-                    }
-                  }}
-                  placeholder="Payment terms, e.g., Net 30, Due on receipt, etc."
-                  maxLength={20}
-                  rows={3}
-                  className="w-full rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm text-gray-900 shadow-sm focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500 dark:border-gray-600 dark:bg-gray-800 dark:text-white dark:shadow-none dark:focus:border-blue-400 dark:focus:ring-blue-400"
-                />
-                <p className="mt-1 text-xs text-gray-500 dark:text-gray-400">
-                  {invoiceData.terms.length}/20 characters
-                </p>
               </div>
 
               {/* Notes Section */}

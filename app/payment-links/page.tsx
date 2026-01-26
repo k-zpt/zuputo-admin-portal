@@ -660,7 +660,6 @@ export default function PaymentLinksPage() {
             format: 'html',
             ccRecipients: cc,
             bccRecipients: bcc,
-            attachments,
         });
         
           setSuccess(`Payment link generated and sent via email to ${recipients.length} recipient(s)!`);

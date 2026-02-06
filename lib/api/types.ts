@@ -291,16 +291,27 @@ export interface PricingInfo {
 }
 
 // Subscription Plan types
+export type BillingFrequency = 'MONTHLY' | 'YEARLY' | 'WEEKLY' | 'DAILY' | 'QUARTERLY' | 'BIANNUAL';
+
+export interface PlanBenefit {
+  serviceType: string;
+  description: string;
+  active: boolean;
+  limit: number;
+  discountPercent: number;
+}
+
 export interface SubscriptionPlan {
   id: string;
   code: string;
   label: string;
   country: string | Country;
   active: boolean;
-  monthlyPricingInfo?: PricingInfo;
-  yearlyPricingInfo?: PricingInfo;
+  billingFrequency?: BillingFrequency;
+  pricingInfo?: PricingInfo;
   description?: string;
   features?: string[];
+  benefits?: PlanBenefit[];
 }
 
 export interface CreateSubscriptionPlanPayload {
@@ -308,16 +319,14 @@ export interface CreateSubscriptionPlanPayload {
   label: string;
   country: string;
   active: boolean;
-  monthlyPricingInfo: {
-    price: number;
-    currency: string;
-  };
-  yearlyPricingInfo: {
+  billingFrequency: BillingFrequency;
+  pricingInfo: {
     price: number;
     currency: string;
   };
   description?: string;
   features?: string[];
+  benefits?: PlanBenefit[];
 }
 
 export interface UpdateSubscriptionPlanPayload {
@@ -325,15 +334,13 @@ export interface UpdateSubscriptionPlanPayload {
   active?: boolean;
   label?: string;
   description?: string;
+  billingFrequency?: BillingFrequency;
   features?: string[];
-  monthlyPricingInfo?: {
+  pricingInfo?: {
     price: number;
     currency: string;
   };
-  yearlyPricingInfo?: {
-    price: number;
-    currency: string;
-  };
+  benefits?: PlanBenefit[];
 }
 
 export interface AdhocRequest {
@@ -546,8 +553,6 @@ export interface OfflineInvoicePayload {
   items: InvoiceItemPayload[];
   notes?: string;
   tax: number;
-  discountRate: number;
-  amountPaid: number;
   currencyId: string;
   countryId: string;
   customerInfo: CustomerInfoPayload;

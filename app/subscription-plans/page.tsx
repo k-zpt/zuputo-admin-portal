@@ -3,7 +3,25 @@
 import { AdminLayout } from "@/components/AdminLayout";
 import { subscriptionPlanService, countryService, currencyService } from "@/lib/api/services";
 import { useState, useEffect } from "react";
-import type { SubscriptionPlan, Country, Currency, ApiResponse, CreateSubscriptionPlanPayload, UpdateSubscriptionPlanPayload } from "@/lib/api/types";
+import type { SubscriptionPlan, Country, Currency, ApiResponse, CreateSubscriptionPlanPayload, UpdateSubscriptionPlanPayload, PlanBenefit, BillingFrequency } from "@/lib/api/types";
+
+// Service type enum values and their human-readable labels
+const SERVICE_TYPES = {
+  AD_HOC: 'Ad Hoc',
+  IP_REGISTRATION: 'IP Registration',
+  TRADEMARK_REGISTRATION: 'Trademark Registration',
+  CONTRACT_REQUEST: 'Contract Request',
+  CONTRACT_REVIEW: 'Contract Review',
+  COMPANY_INCORPORATION: 'Company Incorporation',
+  SOLE_PROPRIETORSHIP_INCORPORATION: 'Sole Proprietorship Incorporation',
+} as const;
+
+type ServiceType = keyof typeof SERVICE_TYPES;
+
+// Helper function to format service type for display
+const formatServiceType = (serviceType: string): string => {
+  return SERVICE_TYPES[serviceType as ServiceType] || serviceType;
+};
 
 export default function SubscriptionPlansPage() {
   const [plans, setPlans] = useState<SubscriptionPlan[]>([]);
@@ -21,18 +39,23 @@ export default function SubscriptionPlansPage() {
     label: '',
     country: '',
     active: true,
-    monthlyPricingInfo: {
-      price: 0,
-      currency: '',
-    },
-    yearlyPricingInfo: {
+    billingFrequency: 'MONTHLY',
+    pricingInfo: {
       price: 0,
       currency: '',
     },
     description: '',
     features: [],
+    benefits: [],
   });
   const [newFeature, setNewFeature] = useState('');
+  const [newBenefit, setNewBenefit] = useState<Partial<PlanBenefit>>({
+    serviceType: '',
+    description: '',
+    active: true,
+    limit: 0,
+    discountPercent: 0,
+  });
 
   useEffect(() => {
     loadPlans();
@@ -107,30 +130,24 @@ export default function SubscriptionPlansPage() {
     // Extract country ID (could be string or Country object)
     const countryId = typeof plan.country === 'string' ? plan.country : plan.country.id;
     
-    // Extract currency IDs from pricing info
-    const monthlyCurrencyId = typeof plan.monthlyPricingInfo?.currency === 'string' 
-      ? plan.monthlyPricingInfo.currency 
-      : plan.monthlyPricingInfo?.currency?.id || '';
-    
-    const yearlyCurrencyId = typeof plan.yearlyPricingInfo?.currency === 'string'
-      ? plan.yearlyPricingInfo.currency
-      : plan.yearlyPricingInfo?.currency?.id || '';
+    // Extract currency ID from pricing info
+    const currencyId = typeof plan.pricingInfo?.currency === 'string' 
+      ? plan.pricingInfo.currency 
+      : plan.pricingInfo?.currency?.id || '';
 
     setFormData({
       code: plan.code,
       label: plan.label,
       country: countryId,
       active: plan.active,
-      monthlyPricingInfo: {
-        price: plan.monthlyPricingInfo?.price || 0,
-        currency: monthlyCurrencyId,
-      },
-      yearlyPricingInfo: {
-        price: plan.yearlyPricingInfo?.price || 0,
-        currency: yearlyCurrencyId,
+      billingFrequency: plan.billingFrequency || 'MONTHLY',
+      pricingInfo: {
+        price: plan.pricingInfo?.price || 0,
+        currency: currencyId,
       },
       description: plan.description || '',
       features: plan.features || [],
+      benefits: plan.benefits || [],
     });
     setEditingPlanId(plan.id);
     setShowCreateForm(false);
@@ -169,6 +186,12 @@ export default function SubscriptionPlansPage() {
         payload.description = formData.description || undefined;
       }
       
+      // Compare billing frequency
+      const currentBillingFrequency = plan.billingFrequency || 'MONTHLY';
+      if (formData.billingFrequency !== currentBillingFrequency) {
+        payload.billingFrequency = formData.billingFrequency;
+      }
+      
       // Compare features
       const currentFeatures = (plan.features || []).sort();
       const newFeatures = (formData.features || []).sort();
@@ -176,32 +199,25 @@ export default function SubscriptionPlansPage() {
         payload.features = formData.features;
       }
       
-      // Compare monthly pricing
-      const currentMonthlyPrice = plan.monthlyPricingInfo?.price || 0;
-      const currentMonthlyCurrencyId = typeof plan.monthlyPricingInfo?.currency === 'string'
-        ? plan.monthlyPricingInfo.currency
-        : plan.monthlyPricingInfo?.currency?.id || '';
+      // Compare pricing info
+      const currentPrice = plan.pricingInfo?.price || 0;
+      const currentCurrencyId = typeof plan.pricingInfo?.currency === 'string'
+        ? plan.pricingInfo.currency
+        : plan.pricingInfo?.currency?.id || '';
       
-      if (formData.monthlyPricingInfo.price !== currentMonthlyPrice || 
-          formData.monthlyPricingInfo.currency !== currentMonthlyCurrencyId) {
-        payload.monthlyPricingInfo = {
-          price: formData.monthlyPricingInfo.price,
-          currency: formData.monthlyPricingInfo.currency,
+      if (formData.pricingInfo.price !== currentPrice || 
+          formData.pricingInfo.currency !== currentCurrencyId) {
+        payload.pricingInfo = {
+          price: formData.pricingInfo.price,
+          currency: formData.pricingInfo.currency,
         };
       }
       
-      // Compare yearly pricing
-      const currentYearlyPrice = plan.yearlyPricingInfo?.price || 0;
-      const currentYearlyCurrencyId = typeof plan.yearlyPricingInfo?.currency === 'string'
-        ? plan.yearlyPricingInfo.currency
-        : plan.yearlyPricingInfo?.currency?.id || '';
-      
-      if (formData.yearlyPricingInfo.price !== currentYearlyPrice ||
-          formData.yearlyPricingInfo.currency !== currentYearlyCurrencyId) {
-        payload.yearlyPricingInfo = {
-          price: formData.yearlyPricingInfo.price,
-          currency: formData.yearlyPricingInfo.currency,
-        };
+      // Compare benefits
+      const currentBenefits = JSON.stringify((plan.benefits || []).sort((a, b) => a.serviceType.localeCompare(b.serviceType)));
+      const newBenefits = JSON.stringify((formData.benefits || []).sort((a, b) => a.serviceType.localeCompare(b.serviceType)));
+      if (currentBenefits !== newBenefits) {
+        payload.benefits = formData.benefits;
       }
       
       await subscriptionPlanService.update(editingPlanId, payload);
@@ -220,18 +236,23 @@ export default function SubscriptionPlansPage() {
       label: '',
       country: '',
       active: true,
-      monthlyPricingInfo: {
-        price: 0,
-        currency: '',
-      },
-      yearlyPricingInfo: {
+      billingFrequency: 'MONTHLY',
+      pricingInfo: {
         price: 0,
         currency: '',
       },
       description: '',
       features: [],
+      benefits: [],
     });
     setNewFeature('');
+    setNewBenefit({
+      serviceType: '',
+      description: '',
+      active: true,
+      limit: 0,
+      discountPercent: 0,
+    });
   };
 
   const handleCancel = () => {
@@ -256,6 +277,35 @@ export default function SubscriptionPlansPage() {
     setFormData({
       ...formData,
       features: formData.features?.filter((_, i) => i !== index) || [],
+    });
+  };
+
+  const addBenefit = () => {
+    if (newBenefit.serviceType?.trim() && newBenefit.description?.trim()) {
+      setFormData({
+        ...formData,
+        benefits: [...(formData.benefits || []), {
+          serviceType: newBenefit.serviceType.trim(),
+          description: newBenefit.description.trim(),
+          active: newBenefit.active ?? true,
+          limit: newBenefit.limit ?? 0,
+          discountPercent: newBenefit.discountPercent ?? 0,
+        }],
+      });
+      setNewBenefit({
+        serviceType: '',
+        description: '',
+        active: true,
+        limit: 0,
+        discountPercent: 0,
+      });
+    }
+  };
+
+  const removeBenefit = (index: number) => {
+    setFormData({
+      ...formData,
+      benefits: formData.benefits?.filter((_, i) => i !== index) || [],
     });
   };
 
@@ -375,6 +425,24 @@ export default function SubscriptionPlansPage() {
                   ))}
                 </select>
               </div>
+              <div>
+                <label className="block text-sm font-medium text-gray-700 dark:text-gray-300">
+                  Billing Frequency *
+                </label>
+                <select
+                  required
+                  value={formData.billingFrequency}
+                  onChange={(e) => setFormData({ ...formData, billingFrequency: e.target.value as BillingFrequency })}
+                  className="mt-1 w-full appearance-none rounded-lg border border-gray-300 bg-white bg-[url('data:image/svg+xml;charset=UTF-8,%3Csvg%20xmlns%3D%22http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%22%20viewBox%3D%220%200%2024%2024%22%20fill%3D%22none%22%20stroke%3D%22%236b7280%22%20stroke-width%3D%222%22%3E%3Cpath%20d%3D%22m6%209%206%206%206-6%22%2F%3E%3C%2Fsvg%3E')] bg-[length:1.5em_1.5em] bg-[right_0.75rem_center] bg-no-repeat px-3 py-2 pr-10 text-sm text-gray-900 shadow-sm focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500 dark:border-gray-600 dark:bg-gray-800 dark:bg-[url('data:image/svg+xml;charset=UTF-8,%3Csvg%20xmlns%3D%22http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%22%20viewBox%3D%220%200%2024%2024%22%20fill%3D%22none%22%20stroke%3D%22%239ca3af%22%20stroke-width%3D%222%22%3E%3Cpath%20d%3D%22m6%209%206%206%206-6%22%2F%3E%3C%2Fsvg%3E')] dark:text-white dark:shadow-none dark:focus:border-blue-400 dark:focus:ring-blue-400"
+                >
+                  <option value="MONTHLY">Monthly</option>
+                  <option value="YEARLY">Yearly</option>
+                  <option value="QUARTERLY">Quarterly</option>
+                  <option value="BIANNUAL">Bi-Annual</option>
+                  <option value="WEEKLY">Weekly</option>
+                  <option value="DAILY">Daily</option>
+                </select>
+              </div>
               <div className="flex items-center gap-2">
                 <input
                   type="checkbox"
@@ -393,98 +461,50 @@ export default function SubscriptionPlansPage() {
             <div className="space-y-4 rounded-lg border border-gray-200 bg-gray-50 p-4 dark:border-gray-700 dark:bg-gray-800">
               <h3 className="text-sm font-semibold text-gray-900 dark:text-white">Pricing Information</h3>
               
-              <div className="grid grid-cols-2 gap-4">
-                <div>
-                  <label className="block text-sm font-medium text-gray-700 dark:text-gray-300">
-                    Monthly Price *
-                  </label>
-                  <div className="mt-1 flex gap-2">
-                    {loadingCurrencies ? (
-                      <div className="text-sm text-gray-500 dark:text-gray-400">Loading currencies...</div>
-                    ) : (
-                      <>
-                        <select
-                          required
-                          value={formData.monthlyPricingInfo.currency}
-                          onChange={(e) => setFormData({
-                            ...formData,
-                            monthlyPricingInfo: { ...formData.monthlyPricingInfo, currency: e.target.value }
-                          })}
-                          className="w-32 appearance-none rounded-lg border border-gray-300 bg-white bg-[url('data:image/svg+xml;charset=UTF-8,%3Csvg%20xmlns%3D%22http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%22%20viewBox%3D%220%200%2024%2024%22%20fill%3D%22none%22%20stroke%3D%22%236b7280%22%20stroke-width%3D%222%22%3E%3Cpath%20d%3D%22m6%209%206%206%206-6%22%2F%3E%3C%2Fsvg%3E')] bg-[length:1.5em_1.5em] bg-[right_0.75rem_center] bg-no-repeat px-3 py-2 pr-10 text-sm text-gray-900 shadow-sm focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500 dark:border-gray-600 dark:bg-gray-800 dark:bg-[url('data:image/svg+xml;charset=UTF-8,%3Csvg%20xmlns%3D%22http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%22%20viewBox%3D%220%200%2024%2024%22%20fill%3D%22none%22%20stroke%3D%22%239ca3af%22%20stroke-width%3D%222%22%3E%3Cpath%20d%3D%22m6%209%206%206%206-6%22%2F%3E%3C%2Fsvg%3E')] dark:text-white dark:shadow-none dark:focus:border-blue-400 dark:focus:ring-blue-400"
-                        >
-                          <option value="">Currency</option>
-                          {currencies.map((currency) => (
-                            <option key={currency.id} value={currency.id}>
-                              {currency.code}
-                            </option>
-                          ))}
-                        </select>
-                        <input
-                          type="text"
-                          required
-                          value={formData.monthlyPricingInfo.price === 0 ? '' : formData.monthlyPricingInfo.price.toString()}
-                          onChange={(e) => {
-                            const value = e.target.value;
-                            // Allow only numbers and a single decimal point
-                            if (value === '' || /^\d*\.?\d*$/.test(value)) {
-                              setFormData({
-                                ...formData,
-                                monthlyPricingInfo: { ...formData.monthlyPricingInfo, price: value === '' ? 0 : parseFloat(value) || 0 }
-                              });
-                            }
-                          }}
-                          placeholder="0.00"
-                          className="flex-1 rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm text-gray-900 shadow-sm focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500 dark:border-gray-600 dark:bg-gray-800 dark:text-white dark:shadow-none dark:focus:border-blue-400 dark:focus:ring-blue-400"
-                        />
-                      </>
-                    )}
-                  </div>
-                </div>
-                <div>
-                  <label className="block text-sm font-medium text-gray-700 dark:text-gray-300">
-                    Yearly Price *
-                  </label>
-                  <div className="mt-1 flex gap-2">
-                    {loadingCurrencies ? (
-                      <div className="text-sm text-gray-500 dark:text-gray-400">Loading currencies...</div>
-                    ) : (
-                      <>
-                        <select
-                          required
-                          value={formData.yearlyPricingInfo.currency}
-                          onChange={(e) => setFormData({
-                            ...formData,
-                            yearlyPricingInfo: { ...formData.yearlyPricingInfo, currency: e.target.value }
-                          })}
-                          className="w-32 appearance-none rounded-lg border border-gray-300 bg-white bg-[url('data:image/svg+xml;charset=UTF-8,%3Csvg%20xmlns%3D%22http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%22%20viewBox%3D%220%200%2024%2024%22%20fill%3D%22none%22%20stroke%3D%22%236b7280%22%20stroke-width%3D%222%22%3E%3Cpath%20d%3D%22m6%209%206%206%206-6%22%2F%3E%3C%2Fsvg%3E')] bg-[length:1.5em_1.5em] bg-[right_0.75rem_center] bg-no-repeat px-3 py-2 pr-10 text-sm text-gray-900 shadow-sm focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500 dark:border-gray-600 dark:bg-gray-800 dark:bg-[url('data:image/svg+xml;charset=UTF-8,%3Csvg%20xmlns%3D%22http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%22%20viewBox%3D%220%200%2024%2024%22%20fill%3D%22none%22%20stroke%3D%22%239ca3af%22%20stroke-width%3D%222%22%3E%3Cpath%20d%3D%22m6%209%206%206%206-6%22%2F%3E%3C%2Fsvg%3E')] dark:text-white dark:shadow-none dark:focus:border-blue-400 dark:focus:ring-blue-400"
-                        >
-                          <option value="">Currency</option>
-                          {currencies.map((currency) => (
-                            <option key={currency.id} value={currency.id}>
-                              {currency.code}
-                            </option>
-                          ))}
-                        </select>
-                        <input
-                          type="text"
-                          required
-                          value={formData.yearlyPricingInfo.price === 0 ? '' : formData.yearlyPricingInfo.price.toString()}
-                          onChange={(e) => {
-                            const value = e.target.value;
-                            // Allow only numbers and a single decimal point
-                            if (value === '' || /^\d*\.?\d*$/.test(value)) {
-                              setFormData({
-                                ...formData,
-                                yearlyPricingInfo: { ...formData.yearlyPricingInfo, price: value === '' ? 0 : parseFloat(value) || 0 }
-                              });
-                            }
-                          }}
-                          placeholder="0.00"
-                          className="flex-1 rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm text-gray-900 shadow-sm focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500 dark:border-gray-600 dark:bg-gray-800 dark:text-white dark:shadow-none dark:focus:border-blue-400 dark:focus:ring-blue-400"
-                        />
-                      </>
-                    )}
-                  </div>
+              <div>
+                <label className="block text-sm font-medium text-gray-700 dark:text-gray-300">
+                  Price *
+                </label>
+                <div className="mt-1 flex gap-2">
+                  {loadingCurrencies ? (
+                    <div className="text-sm text-gray-500 dark:text-gray-400">Loading currencies...</div>
+                  ) : (
+                    <>
+                      <select
+                        required
+                        value={formData.pricingInfo.currency}
+                        onChange={(e) => setFormData({
+                          ...formData,
+                          pricingInfo: { ...formData.pricingInfo, currency: e.target.value }
+                        })}
+                        className="w-32 appearance-none rounded-lg border border-gray-300 bg-white bg-[url('data:image/svg+xml;charset=UTF-8,%3Csvg%20xmlns%3D%22http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%22%20viewBox%3D%220%200%2024%2024%22%20fill%3D%22none%22%20stroke%3D%22%236b7280%22%20stroke-width%3D%222%22%3E%3Cpath%20d%3D%22m6%209%206%206%206-6%22%2F%3E%3C%2Fsvg%3E')] bg-[length:1.5em_1.5em] bg-[right_0.75rem_center] bg-no-repeat px-3 py-2 pr-10 text-sm text-gray-900 shadow-sm focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500 dark:border-gray-600 dark:bg-gray-800 dark:bg-[url('data:image/svg+xml;charset=UTF-8,%3Csvg%20xmlns%3D%22http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%22%20viewBox%3D%220%200%2024%2024%22%20fill%3D%22none%22%20stroke%3D%22%239ca3af%22%20stroke-width%3D%222%22%3E%3Cpath%20d%3D%22m6%209%206%206%206-6%22%2F%3E%3C%2Fsvg%3E')] dark:text-white dark:shadow-none dark:focus:border-blue-400 dark:focus:ring-blue-400"
+                      >
+                        <option value="">Currency</option>
+                        {currencies.map((currency) => (
+                          <option key={currency.id} value={currency.id}>
+                            {currency.code}
+                          </option>
+                        ))}
+                      </select>
+                      <input
+                        type="text"
+                        required
+                        value={formData.pricingInfo.price === 0 ? '' : formData.pricingInfo.price.toString()}
+                        onChange={(e) => {
+                          const value = e.target.value;
+                          // Allow only numbers and a single decimal point
+                          if (value === '' || /^\d*\.?\d*$/.test(value)) {
+                            setFormData({
+                              ...formData,
+                              pricingInfo: { ...formData.pricingInfo, price: value === '' ? 0 : parseFloat(value) || 0 }
+                            });
+                          }
+                        }}
+                        placeholder="0.00"
+                        className="flex-1 rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm text-gray-900 shadow-sm focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500 dark:border-gray-600 dark:bg-gray-800 dark:text-white dark:shadow-none dark:focus:border-blue-400 dark:focus:ring-blue-400"
+                      />
+                    </>
+                  )}
                 </div>
               </div>
             </div>
@@ -548,6 +568,129 @@ export default function SubscriptionPlansPage() {
               </div>
             </div>
 
+            {/* Benefits */}
+            <div>
+              <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
+                Benefits
+              </label>
+              <div className="space-y-2">
+                {formData.benefits && formData.benefits.length > 0 && (
+                  <div className="space-y-2">
+                    {formData.benefits.map((benefit, index) => (
+                      <div key={index} className="rounded-lg border border-gray-200 bg-white p-3 dark:border-gray-700 dark:bg-gray-800">
+                        <div className="flex items-start justify-between">
+                          <div className="flex-1 space-y-1">
+                            <div className="flex items-center gap-2">
+                              <span className="text-sm font-medium text-gray-900 dark:text-white">{formatServiceType(benefit.serviceType)}</span>
+                              <span className={`rounded-full px-2 py-0.5 text-xs font-medium ${
+                                benefit.active
+                                  ? 'bg-green-100 text-green-800 dark:bg-green-900/30 dark:text-green-200'
+                                  : 'bg-gray-100 text-gray-800 dark:bg-gray-700 dark:text-gray-200'
+                              }`}>
+                                {benefit.active ? 'Active' : 'Inactive'}
+                              </span>
+                            </div>
+                            <p className="text-sm text-gray-600 dark:text-gray-400">{benefit.description}</p>
+                            <div className="flex gap-4 text-xs text-gray-500 dark:text-gray-400">
+                              <span>Limit: {benefit.limit}</span>
+                              <span>Discount: {benefit.discountPercent}%</span>
+                            </div>
+                          </div>
+                          <button
+                            type="button"
+                            onClick={() => removeBenefit(index)}
+                            className="ml-2 text-red-600 hover:text-red-700 dark:text-red-400 dark:hover:text-red-300"
+                          >
+                            ✕
+                          </button>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                )}
+                <div className="space-y-3 rounded-lg border border-gray-200 bg-gray-50 p-4 dark:border-gray-700 dark:bg-gray-800">
+                  <div className="grid grid-cols-2 gap-3">
+                    <div>
+                      <label className="block text-xs font-medium text-gray-700 dark:text-gray-300 mb-1">
+                        Service Type *
+                      </label>
+                      <select
+                        required
+                        value={newBenefit.serviceType || ''}
+                        onChange={(e) => setNewBenefit({ ...newBenefit, serviceType: e.target.value })}
+                        className="w-full appearance-none rounded-lg border border-gray-300 bg-white bg-[url('data:image/svg+xml;charset=UTF-8,%3Csvg%20xmlns%3D%22http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%22%20viewBox%3D%220%200%2024%2024%22%20fill%3D%22none%22%20stroke%3D%22%236b7280%22%20stroke-width%3D%222%22%3E%3Cpath%20d%3D%22m6%209%206%206%206-6%22%2F%3E%3C%2Fsvg%3E')] bg-[length:1.5em_1.5em] bg-[right_0.75rem_center] bg-no-repeat px-3 py-2 pr-10 text-sm text-gray-900 shadow-sm focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500 dark:border-gray-600 dark:bg-gray-800 dark:bg-[url('data:image/svg+xml;charset=UTF-8,%3Csvg%20xmlns%3D%22http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%22%20viewBox%3D%220%200%2024%2024%22%20fill%3D%22none%22%20stroke%3D%22%239ca3af%22%20stroke-width%3D%222%22%3E%3Cpath%20d%3D%22m6%209%206%206%206-6%22%2F%3E%3C%2Fsvg%3E')] dark:text-white dark:shadow-none dark:focus:border-blue-400 dark:focus:ring-blue-400"
+                      >
+                        <option value="">Select service type</option>
+                        {Object.entries(SERVICE_TYPES).map(([value, label]) => (
+                          <option key={value} value={value}>
+                            {label}
+                          </option>
+                        ))}
+                      </select>
+                    </div>
+                    <div>
+                      <label className="block text-xs font-medium text-gray-700 dark:text-gray-300 mb-1">
+                        Limit *
+                      </label>
+                      <input
+                        type="number"
+                        value={newBenefit.limit || 0}
+                        onChange={(e) => setNewBenefit({ ...newBenefit, limit: parseInt(e.target.value) || 0 })}
+                        min="0"
+                        className="w-full rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm text-gray-900 shadow-sm focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500 dark:border-gray-600 dark:bg-gray-800 dark:text-white dark:shadow-none dark:focus:border-blue-400 dark:focus:ring-blue-400"
+                      />
+                    </div>
+                  </div>
+                  <div>
+                    <label className="block text-xs font-medium text-gray-700 dark:text-gray-300 mb-1">
+                      Description *
+                    </label>
+                    <input
+                      type="text"
+                      value={newBenefit.description || ''}
+                      onChange={(e) => setNewBenefit({ ...newBenefit, description: e.target.value })}
+                      placeholder="Benefit description"
+                      className="w-full rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm text-gray-900 shadow-sm focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500 dark:border-gray-600 dark:bg-gray-800 dark:text-white dark:shadow-none dark:focus:border-blue-400 dark:focus:ring-blue-400"
+                    />
+                  </div>
+                  <div className="grid grid-cols-2 gap-3">
+                    <div>
+                      <label className="block text-xs font-medium text-gray-700 dark:text-gray-300 mb-1">
+                        Discount Percent *
+                      </label>
+                      <input
+                        type="number"
+                        value={newBenefit.discountPercent || 0}
+                        onChange={(e) => setNewBenefit({ ...newBenefit, discountPercent: parseInt(e.target.value) || 0 })}
+                        min="0"
+                        max="100"
+                        className="w-full rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm text-gray-900 shadow-sm focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500 dark:border-gray-600 dark:bg-gray-800 dark:text-white dark:shadow-none dark:focus:border-blue-400 dark:focus:ring-blue-400"
+                      />
+                    </div>
+                    <div className="flex items-center gap-2 pt-6">
+                      <input
+                        type="checkbox"
+                        id="benefit-active"
+                        checked={newBenefit.active ?? true}
+                        onChange={(e) => setNewBenefit({ ...newBenefit, active: e.target.checked })}
+                        className="h-4 w-4 rounded border-gray-300 text-blue-600 focus:ring-blue-500 dark:border-gray-600 dark:bg-gray-700"
+                      />
+                      <label htmlFor="benefit-active" className="text-sm font-medium text-gray-700 dark:text-gray-300">
+                        Active
+                      </label>
+                    </div>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={addBenefit}
+                    className="w-full rounded-lg bg-blue-600 px-4 py-2 text-sm text-white hover:bg-blue-700 dark:bg-blue-500 dark:hover:bg-blue-600"
+                  >
+                    Add Benefit
+                  </button>
+                </div>
+              </div>
+            </div>
+
             <div className="flex gap-3">
               <button
                 type="button"
@@ -596,10 +739,10 @@ export default function SubscriptionPlansPage() {
                       Country
                     </th>
                     <th className="px-6 py-3 text-left text-xs font-medium uppercase tracking-wider text-gray-500 dark:text-gray-400">
-                      Monthly Price
+                      Billing Frequency
                     </th>
                     <th className="px-6 py-3 text-left text-xs font-medium uppercase tracking-wider text-gray-500 dark:text-gray-400">
-                      Yearly Price
+                      Price
                     </th>
                     <th className="px-6 py-3 text-left text-xs font-medium uppercase tracking-wider text-gray-500 dark:text-gray-400">
                       Status
@@ -629,13 +772,11 @@ export default function SubscriptionPlansPage() {
                           {getCountryName(plan.country)}
                         </td>
                         <td className="whitespace-nowrap px-6 py-4 text-sm text-gray-600 dark:text-gray-400">
-                          {plan.monthlyPricingInfo
-                            ? `${getCurrencyCode(plan.monthlyPricingInfo.currency)} ${formatPrice(plan.monthlyPricingInfo.price)}`
-                            : 'N/A'}
+                          {plan.billingFrequency || 'N/A'}
                         </td>
                         <td className="whitespace-nowrap px-6 py-4 text-sm text-gray-600 dark:text-gray-400">
-                          {plan.yearlyPricingInfo
-                            ? `${getCurrencyCode(plan.yearlyPricingInfo.currency)} ${formatPrice(plan.yearlyPricingInfo.price)}`
+                          {plan.pricingInfo
+                            ? `${getCurrencyCode(plan.pricingInfo.currency)} ${formatPrice(plan.pricingInfo.price)}`
                             : 'N/A'}
                         </td>
                         <td className="whitespace-nowrap px-6 py-4 text-sm">

@@ -79,6 +79,23 @@ export interface CustomerProfile extends Omit<Customer, 'country'> {
   [key: string]: any; // Allow for additional profile fields
 }
 
+// Subscription Usage types
+export interface SubscriptionUsageItem {
+  limit: number;
+  used: number;
+  remaining: number;
+  discount_percent: number;
+  period: string;
+}
+
+export interface SubscriptionUsage {
+  [serviceType: string]: SubscriptionUsageItem; // e.g., "CONTRACT_REQUEST", "CONTRACT_REVIEW"
+}
+
+export interface UpdateSubscriptionUsagePayload {
+  service_request_id: string;
+}
+
 // Form types
 export interface FieldOption {
   label: string;

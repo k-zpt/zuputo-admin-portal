@@ -5,7 +5,7 @@ import { customerService, serviceRequestService } from "@/lib/api/services";
 import { useState, useEffect } from "react";
 import { useParams, useRouter } from "next/navigation";
 import Link from "next/link";
-import type { CustomerProfile, ServiceRequest, ApiResponse } from "@/lib/api/types";
+import type { CustomerProfile, ServiceRequest, ApiResponse, SubscriptionUsage } from "@/lib/api/types";
 
 export default function CustomerDetailPage() {
   const params = useParams();
@@ -26,6 +26,11 @@ export default function CustomerDetailPage() {
     status: '',
     paid: '', // 'paid', 'unpaid', or ''
   });
+  const [subscriptionUsage, setSubscriptionUsage] = useState<SubscriptionUsage | null>(null);
+  const [loadingUsage, setLoadingUsage] = useState(false);
+  const [showUpdateUsageModal, setShowUpdateUsageModal] = useState(false);
+  const [selectedServiceRequestForUsage, setSelectedServiceRequestForUsage] = useState<ServiceRequest | null>(null);
+  const [updatingUsage, setUpdatingUsage] = useState(false);
 
   useEffect(() => {
     const loadProfile = async () => {
@@ -34,6 +39,10 @@ export default function CustomerDetailPage() {
         setError(null);
         const response: ApiResponse<CustomerProfile> = await customerService.getProfile(customerId);
         setProfile(response.data);
+        // Load subscription usage if customer has a subscription
+        if (response.data.subscription) {
+          loadSubscriptionUsage();
+        }
       } catch (err) {
         setError(err instanceof Error ? err.message : 'Failed to load customer profile');
       } finally {
@@ -42,6 +51,41 @@ export default function CustomerDetailPage() {
     };
     loadProfile();
   }, [customerId]);
+
+  const loadSubscriptionUsage = async () => {
+    try {
+      setLoadingUsage(true);
+      const response: ApiResponse<SubscriptionUsage> = await customerService.getSubscriptionUsage(customerId);
+      setSubscriptionUsage(response.data);
+    } catch (err) {
+      console.error('Failed to load subscription usage:', err);
+      // Don't show error if customer doesn't have usage (might not have subscription)
+    } finally {
+      setLoadingUsage(false);
+    }
+  };
+
+  const handleUpdateUsage = async () => {
+    if (!selectedServiceRequestForUsage) return;
+    
+    try {
+      setUpdatingUsage(true);
+      setError(null);
+      await customerService.updateSubscriptionUsage(customerId, {
+        service_request_id: selectedServiceRequestForUsage.id,
+      });
+      setShowUpdateUsageModal(false);
+      setSelectedServiceRequestForUsage(null);
+      // Reload usage to show updated values
+      await loadSubscriptionUsage();
+      // Show success message
+      setError(null);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to update subscription usage');
+    } finally {
+      setUpdatingUsage(false);
+    }
+  };
 
   useEffect(() => {
     const loadServiceRequests = async () => {
@@ -290,6 +334,90 @@ export default function CustomerDetailPage() {
                   </p>
                 </div>
               </div>
+            </div>
+          </div>
+        )}
+
+        {/* Subscription Usage Section */}
+        {profile?.subscription && (
+          <div className="rounded-lg border border-gray-200 bg-white dark:border-gray-800 dark:bg-gray-900">
+            <div className="border-b border-gray-200 px-6 py-4 dark:border-gray-700">
+              <div className="flex items-center justify-between">
+                <h2 className="text-xl font-semibold text-gray-900 dark:text-white">Subscription Usage</h2>
+                <button
+                  onClick={() => {
+                    setShowUpdateUsageModal(true);
+                    setSelectedServiceRequestForUsage(null);
+                  }}
+                  className="rounded-lg bg-blue-600 px-4 py-2 text-sm text-white hover:bg-blue-700 dark:bg-blue-500 dark:hover:bg-blue-600"
+                >
+                  Update Usage
+                </button>
+              </div>
+            </div>
+
+            <div className="p-6">
+              {loadingUsage ? (
+                <div className="text-center text-gray-600 dark:text-gray-400 py-4">Loading usage...</div>
+              ) : subscriptionUsage && Object.keys(subscriptionUsage).length > 0 ? (
+                <div className="space-y-4">
+                  {Object.entries(subscriptionUsage).map(([serviceType, usage]) => (
+                    <div key={serviceType} className="rounded-lg border border-gray-200 bg-gray-50 p-4 dark:border-gray-700 dark:bg-gray-800">
+                      <div className="flex items-center justify-between mb-3">
+                        <h3 className="text-lg font-semibold text-gray-900 dark:text-white">
+                          {serviceType.replace(/_/g, ' ').replace(/\b\w/g, l => l.toUpperCase())}
+                        </h3>
+                        <span className={`rounded-full px-3 py-1 text-xs font-medium ${
+                          usage.remaining > 0
+                            ? 'bg-green-100 text-green-800 dark:bg-green-900/30 dark:text-green-200'
+                            : 'bg-red-100 text-red-800 dark:bg-red-900/30 dark:text-red-200'
+                        }`}>
+                          {usage.remaining > 0 ? `${usage.remaining} remaining` : 'Exhausted'}
+                        </span>
+                      </div>
+                      <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+                        <div>
+                          <label className="text-xs font-medium text-gray-500 dark:text-gray-400">Limit</label>
+                          <p className="text-sm font-semibold text-gray-900 dark:text-white">{usage.limit}</p>
+                        </div>
+                        <div>
+                          <label className="text-xs font-medium text-gray-500 dark:text-gray-400">Used</label>
+                          <p className="text-sm font-semibold text-gray-900 dark:text-white">{usage.used}</p>
+                        </div>
+                        <div>
+                          <label className="text-xs font-medium text-gray-500 dark:text-gray-400">Remaining</label>
+                          <p className="text-sm font-semibold text-gray-900 dark:text-white">{usage.remaining}</p>
+                        </div>
+                        <div>
+                          <label className="text-xs font-medium text-gray-500 dark:text-gray-400">Discount</label>
+                          <p className="text-sm font-semibold text-gray-900 dark:text-white">{usage.discount_percent}%</p>
+                        </div>
+                      </div>
+                      <div className="mt-3">
+                        <div className="flex items-center justify-between text-xs text-gray-500 dark:text-gray-400 mb-1">
+                          <span>Usage Progress</span>
+                          <span>{Math.round((usage.used / usage.limit) * 100)}%</span>
+                        </div>
+                        <div className="w-full bg-gray-200 rounded-full h-2 dark:bg-gray-700">
+                          <div
+                            className={`h-2 rounded-full ${
+                              usage.remaining > 0 ? 'bg-blue-600' : 'bg-red-600'
+                            }`}
+                            style={{ width: `${Math.min((usage.used / usage.limit) * 100, 100)}%` }}
+                          ></div>
+                        </div>
+                      </div>
+                      <div className="mt-2 text-xs text-gray-500 dark:text-gray-400">
+                        Period: {usage.period}
+                      </div>
+                    </div>
+                  ))}
+                </div>
+              ) : (
+                <div className="text-center text-gray-600 dark:text-gray-400 py-4">
+                  No usage data available
+                </div>
+              )}
             </div>
           </div>
         )}
@@ -611,6 +739,185 @@ export default function CustomerDetailPage() {
                     </div>
                   </div>
                 )}
+              </div>
+            </div>
+          </div>
+        )}
+
+        {/* Update Subscription Usage Modal */}
+        {showUpdateUsageModal && (
+          <div className="fixed inset-0 z-50 flex items-center justify-center bg-black bg-opacity-50" onClick={() => setShowUpdateUsageModal(false)}>
+            <div className="relative w-full max-w-3xl max-h-[90vh] overflow-y-auto rounded-lg border border-gray-200 bg-white dark:border-gray-800 dark:bg-gray-900 m-4" onClick={(e) => e.stopPropagation()}>
+              <div className="sticky top-0 border-b border-gray-200 bg-white px-6 py-4 dark:border-gray-700 dark:bg-gray-900 flex items-center justify-between">
+                <h2 className="text-xl font-semibold text-gray-900 dark:text-white">Update Subscription Usage</h2>
+                <button
+                  onClick={() => {
+                    setShowUpdateUsageModal(false);
+                    setSelectedServiceRequestForUsage(null);
+                  }}
+                  className="text-gray-400 hover:text-gray-600 dark:hover:text-gray-300"
+                >
+                  <svg className="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                  </svg>
+                </button>
+              </div>
+              <div className="p-6 space-y-6">
+                {error && (
+                  <div className="rounded-lg border border-red-300 bg-red-50 p-4 text-red-800 dark:border-red-800 dark:bg-red-900/20 dark:text-red-200">
+                    {error}
+                  </div>
+                )}
+
+                <div>
+                  <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
+                    Select Service Request *
+                  </label>
+                  <p className="text-xs text-gray-500 dark:text-gray-400 mb-3">
+                    Only service requests with types matching your subscription benefits are shown.
+                  </p>
+                  {loadingRequests ? (
+                    <div className="text-center text-gray-600 dark:text-gray-400 py-4">Loading service requests...</div>
+                  ) : (() => {
+                    // Filter service requests to only show those whose types match subscription usage keys
+                    const allowedTypes = subscriptionUsage ? Object.keys(subscriptionUsage) : [];
+                    const filteredRequests = serviceRequests.filter(req => 
+                      allowedTypes.includes(req.type)
+                    );
+
+                    if (filteredRequests.length === 0) {
+                      return (
+                        <div className="text-center text-gray-600 dark:text-gray-400 py-4">
+                          No service requests available that match your subscription benefits.
+                        </div>
+                      );
+                    }
+
+                    return (
+                      <div className="space-y-2 max-h-96 overflow-y-auto">
+                        {filteredRequests.map((request) => (
+                          <div
+                            key={request.id}
+                            onClick={() => setSelectedServiceRequestForUsage(request)}
+                            className={`cursor-pointer rounded-lg border p-4 transition-colors ${
+                              selectedServiceRequestForUsage?.id === request.id
+                                ? 'border-blue-500 bg-blue-50 dark:bg-blue-900/20'
+                                : 'border-gray-200 bg-white hover:bg-gray-50 dark:border-gray-700 dark:bg-gray-800 dark:hover:bg-gray-700'
+                            }`}
+                          >
+                            <div className="flex items-start justify-between gap-4">
+                              <div className="flex-1 space-y-2">
+                                <div className="flex items-center gap-2">
+                                  <span className="text-sm font-medium text-gray-900 dark:text-white">
+                                    {request.type.replace(/_/g, ' ').replace(/\b\w/g, l => l.toUpperCase())}
+                                  </span>
+                                  <span className={`rounded-full px-2 py-0.5 text-xs font-medium ${
+                                    request.status === 'COMPLETED'
+                                      ? 'bg-green-100 text-green-800 dark:bg-green-900/30 dark:text-green-200'
+                                      : request.status === 'PENDING'
+                                      ? 'bg-yellow-100 text-yellow-800 dark:bg-yellow-900/30 dark:text-yellow-200'
+                                      : 'bg-gray-100 text-gray-800 dark:bg-gray-700 dark:text-gray-200'
+                                  }`}>
+                                    {request.status}
+                                  </span>
+                                </div>
+                                
+                                {/* Created Date */}
+                                {request.context?.created && (
+                                  <div className="flex items-center gap-2">
+                                    <span className="text-xs font-medium text-gray-500 dark:text-gray-400">Created:</span>
+                                    <span className="text-xs text-gray-700 dark:text-gray-300">
+                                      {new Date(request.context.created).toLocaleDateString('en-US', {
+                                        year: 'numeric',
+                                        month: 'short',
+                                        day: 'numeric',
+                                        hour: '2-digit',
+                                        minute: '2-digit',
+                                      })}
+                                    </span>
+                                  </div>
+                                )}
+
+                                {/* Pricing Info */}
+                                {request.pricingInfo && (
+                                  <div className="flex items-center gap-2">
+                                    <span className="text-xs font-medium text-gray-500 dark:text-gray-400">Price:</span>
+                                    <span className="text-xs font-semibold text-gray-900 dark:text-white">
+                                      {typeof request.pricingInfo.currency === 'string' 
+                                        ? request.pricingInfo.currency 
+                                        : request.pricingInfo.currency.code} {request.pricingInfo.price}
+                                    </span>
+                                  </div>
+                                )}
+
+                                {/* Invoice Details */}
+                                {request.invoice ? (
+                                  <div className="space-y-1">
+                                    <div className="flex items-center gap-2">
+                                      <span className="text-xs font-medium text-gray-500 dark:text-gray-400">Invoice:</span>
+                                      <span className="text-xs font-semibold text-gray-900 dark:text-white">
+                                        {request.invoice.number}
+                                      </span>
+                                    </div>
+                                    <div className="flex items-center gap-2">
+                                      <span className="text-xs font-medium text-gray-500 dark:text-gray-400">Invoice Status:</span>
+                                      <span className={`rounded-full px-2 py-0.5 text-xs font-medium ${
+                                        request.invoice.status === 'PAID'
+                                          ? 'bg-green-100 text-green-800 dark:bg-green-900/30 dark:text-green-200'
+                                          : request.invoice.status === 'UNPAID'
+                                          ? 'bg-yellow-100 text-yellow-800 dark:bg-yellow-900/30 dark:text-yellow-200'
+                                          : request.invoice.status === 'CANCELLED'
+                                          ? 'bg-red-100 text-red-800 dark:bg-red-900/30 dark:text-red-200'
+                                          : 'bg-gray-100 text-gray-800 dark:bg-gray-700 dark:text-gray-200'
+                                      }`}>
+                                        {request.invoice.status || 'N/A'}
+                                      </span>
+                                    </div>
+                                  </div>
+                                ) : (
+                                  <div className="flex items-center gap-2">
+                                    <span className="text-xs font-medium text-gray-500 dark:text-gray-400">Invoice:</span>
+                                    <span className="text-xs text-gray-500 dark:text-gray-400 italic">No invoice</span>
+                                  </div>
+                                )}
+
+                                {/* Request ID (smaller, at bottom) */}
+                                <p className="text-xs text-gray-400 dark:text-gray-500 pt-1 border-t border-gray-200 dark:border-gray-700">
+                                  ID: {request.id}
+                                </p>
+                              </div>
+                              {selectedServiceRequestForUsage?.id === request.id && (
+                                <svg className="w-5 h-5 text-blue-600 dark:text-blue-400 flex-shrink-0 mt-1" fill="currentColor" viewBox="0 0 20 20">
+                                  <path fillRule="evenodd" d="M10 18a8 8 0 100-16 8 8 0 000 16zm3.707-9.293a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z" clipRule="evenodd" />
+                                </svg>
+                              )}
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    );
+                  })()}
+                </div>
+
+                <div className="flex gap-3 justify-end">
+                  <button
+                    onClick={() => {
+                      setShowUpdateUsageModal(false);
+                      setSelectedServiceRequestForUsage(null);
+                    }}
+                    className="rounded-lg border border-gray-300 bg-white px-4 py-2 text-gray-700 hover:bg-gray-50 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-300 dark:hover:bg-gray-700"
+                    disabled={updatingUsage}
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    onClick={handleUpdateUsage}
+                    disabled={!selectedServiceRequestForUsage || updatingUsage}
+                    className="rounded-lg bg-blue-600 px-4 py-2 text-white hover:bg-blue-700 disabled:bg-gray-400 disabled:cursor-not-allowed dark:bg-blue-500 dark:hover:bg-blue-600"
+                  >
+                    {updatingUsage ? 'Updating...' : 'Update Usage'}
+                  </button>
+                </div>
               </div>
             </div>
           </div>

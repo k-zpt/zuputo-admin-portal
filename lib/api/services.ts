@@ -19,6 +19,8 @@ import type {
   SubscriptionPlan,
   CreateSubscriptionPlanPayload,
   UpdateSubscriptionPlanPayload,
+  SubscriptionUsage,
+  UpdateSubscriptionUsagePayload,
   ApiResponse,
 } from './types';
 
@@ -75,6 +77,14 @@ export const customerService = {
   
   notify: async (customerId: string, data: NotifyCustomerPayload) => {
     return apiClient.post<{ success: boolean }>(API_ENDPOINTS.notifyCustomer(customerId), data);
+  },
+  
+  getSubscriptionUsage: async (customerId: string) => {
+    return apiClient.get<SubscriptionUsage>(API_ENDPOINTS.customerSubscriptionUsage(customerId));
+  },
+  
+  updateSubscriptionUsage: async (customerId: string, data: UpdateSubscriptionUsagePayload) => {
+    return apiClient.patch<{}>(API_ENDPOINTS.customerSubscriptionUsage(customerId), data);
   },
 };
 

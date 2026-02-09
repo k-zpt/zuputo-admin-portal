@@ -18,6 +18,7 @@ export const API_ENDPOINTS = {
   customerById: (id: string) => `/api/v2/customers/${id}`,
   customerProfile: (id: string) => `/api/v1/customers/${id}/profile`,
   notifyCustomer: (id: string) => `/api/v2/customers/${id}/notify`,
+  customerSubscriptionUsage: (id: string) => `/api/v2/customers/${id}/subscription/usage`,
   
   // Service Requests
   serviceRequests: '/api/v2/service-requests',

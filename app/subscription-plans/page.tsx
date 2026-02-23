@@ -56,6 +56,7 @@ export default function SubscriptionPlansPage() {
     limit: 0,
     discountPercent: 0,
   });
+  const [editingBenefitIndex, setEditingBenefitIndex] = useState<number | null>(null);
 
   useEffect(() => {
     loadPlans();
@@ -127,8 +128,12 @@ export default function SubscriptionPlansPage() {
   };
 
   const handleEdit = (plan: SubscriptionPlan) => {
-    // Extract country ID (could be string or Country object)
-    const countryId = typeof plan.country === 'string' ? plan.country : plan.country.id;
+    // Extract country ID (could be string, Country object, or undefined)
+    const countryId = !plan.country 
+      ? '' 
+      : typeof plan.country === 'string' 
+        ? plan.country 
+        : plan.country.id || '';
     
     // Extract currency ID from pricing info
     const currencyId = typeof plan.pricingInfo?.currency === 'string' 
@@ -169,7 +174,11 @@ export default function SubscriptionPlansPage() {
       const payload: UpdateSubscriptionPlanPayload = {};
       
       // Only include changed fields
-      const countryId = typeof plan.country === 'string' ? plan.country : plan.country.id;
+      const countryId = !plan.country 
+        ? '' 
+        : typeof plan.country === 'string' 
+          ? plan.country 
+          : plan.country.id || '';
       if (formData.country !== countryId) {
         payload.country = formData.country;
       }
@@ -213,11 +222,13 @@ export default function SubscriptionPlansPage() {
         };
       }
       
-      // Compare benefits
-      const currentBenefits = JSON.stringify((plan.benefits || []).sort((a, b) => a.serviceType.localeCompare(b.serviceType)));
-      const newBenefits = JSON.stringify((formData.benefits || []).sort((a, b) => a.serviceType.localeCompare(b.serviceType)));
-      if (currentBenefits !== newBenefits) {
-        payload.benefits = formData.benefits;
+      // Send only newly added benefits (backend adds these; sending full list would duplicate existing)
+      const existingServiceTypes = new Set((plan.benefits || []).map((b) => b.serviceType));
+      const newBenefitsToAdd = (formData.benefits || []).filter(
+        (fb) => !existingServiceTypes.has(fb.serviceType)
+      );
+      if (newBenefitsToAdd.length > 0) {
+        payload.benefits = newBenefitsToAdd;
       }
       
       await subscriptionPlanService.update(editingPlanId, payload);
@@ -253,6 +264,7 @@ export default function SubscriptionPlansPage() {
       limit: 0,
       discountPercent: 0,
     });
+    setEditingBenefitIndex(null);
   };
 
   const handleCancel = () => {
@@ -282,16 +294,34 @@ export default function SubscriptionPlansPage() {
 
   const addBenefit = () => {
     if (newBenefit.serviceType?.trim() && newBenefit.description?.trim()) {
-      setFormData({
-        ...formData,
-        benefits: [...(formData.benefits || []), {
+      if (editingBenefitIndex !== null) {
+        // Update existing benefit
+        const updatedBenefits = [...(formData.benefits || [])];
+        updatedBenefits[editingBenefitIndex] = {
           serviceType: newBenefit.serviceType.trim(),
           description: newBenefit.description.trim(),
           active: newBenefit.active ?? true,
           limit: newBenefit.limit ?? 0,
           discountPercent: newBenefit.discountPercent ?? 0,
-        }],
-      });
+        };
+        setFormData({
+          ...formData,
+          benefits: updatedBenefits,
+        });
+        setEditingBenefitIndex(null);
+      } else {
+        // Add new benefit
+        setFormData({
+          ...formData,
+          benefits: [...(formData.benefits || []), {
+            serviceType: newBenefit.serviceType.trim(),
+            description: newBenefit.description.trim(),
+            active: newBenefit.active ?? true,
+            limit: newBenefit.limit ?? 0,
+            discountPercent: newBenefit.discountPercent ?? 0,
+          }],
+        });
+      }
       setNewBenefit({
         serviceType: '',
         description: '',
@@ -302,11 +332,43 @@ export default function SubscriptionPlansPage() {
     }
   };
 
+  const startEditingBenefit = (index: number) => {
+    const benefit = formData.benefits?.[index];
+    if (benefit) {
+      setNewBenefit({
+        serviceType: benefit.serviceType,
+        description: benefit.description,
+        active: benefit.active,
+        limit: benefit.limit,
+        discountPercent: benefit.discountPercent,
+      });
+      setEditingBenefitIndex(index);
+    }
+  };
+
+  const cancelEditingBenefit = () => {
+    setEditingBenefitIndex(null);
+    setNewBenefit({
+      serviceType: '',
+      description: '',
+      active: true,
+      limit: 0,
+      discountPercent: 0,
+    });
+  };
+
   const removeBenefit = (index: number) => {
     setFormData({
       ...formData,
       benefits: formData.benefits?.filter((_, i) => i !== index) || [],
     });
+    // If we're editing the benefit being removed, cancel editing
+    if (editingBenefitIndex === index) {
+      cancelEditingBenefit();
+    } else if (editingBenefitIndex !== null && editingBenefitIndex > index) {
+      // Adjust the editing index if a benefit before the one being edited is removed
+      setEditingBenefitIndex(editingBenefitIndex - 1);
+    }
   };
 
   const getCountryName = (country: string | Country | undefined): string => {
@@ -389,7 +451,7 @@ export default function SubscriptionPlansPage() {
                 <input
                   type="text"
                   required
-                  value={formData.code}
+                  value={formData.code || ''}
                   onChange={(e) => setFormData({ ...formData, code: e.target.value.toUpperCase() })}
                   disabled={!!editingPlanId}
                   className="mt-1 w-full rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm text-gray-900 shadow-sm focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500 disabled:bg-gray-100 disabled:cursor-not-allowed dark:border-gray-600 dark:bg-gray-800 dark:text-white dark:shadow-none dark:focus:border-blue-400 dark:focus:ring-blue-400 dark:disabled:bg-gray-900"
@@ -402,7 +464,7 @@ export default function SubscriptionPlansPage() {
                 <input
                   type="text"
                   required
-                  value={formData.label}
+                  value={formData.label || ''}
                   onChange={(e) => setFormData({ ...formData, label: e.target.value })}
                   className="mt-1 w-full rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm text-gray-900 shadow-sm focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500 dark:border-gray-600 dark:bg-gray-800 dark:text-white dark:shadow-none dark:focus:border-blue-400 dark:focus:ring-blue-400"
                 />
@@ -413,7 +475,7 @@ export default function SubscriptionPlansPage() {
                 </label>
                 <select
                   required
-                  value={formData.country}
+                  value={formData.country || ''}
                   onChange={(e) => setFormData({ ...formData, country: e.target.value })}
                   className="mt-1 w-full appearance-none rounded-lg border border-gray-300 bg-white bg-[url('data:image/svg+xml;charset=UTF-8,%3Csvg%20xmlns%3D%22http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%22%20viewBox%3D%220%200%2024%2024%22%20fill%3D%22none%22%20stroke%3D%22%236b7280%22%20stroke-width%3D%222%22%3E%3Cpath%20d%3D%22m6%209%206%206%206-6%22%2F%3E%3C%2Fsvg%3E')] bg-[length:1.5em_1.5em] bg-[right_0.75rem_center] bg-no-repeat px-3 py-2 pr-10 text-sm text-gray-900 shadow-sm focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500 dark:border-gray-600 dark:bg-gray-800 dark:bg-[url('data:image/svg+xml;charset=UTF-8,%3Csvg%20xmlns%3D%22http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%22%20viewBox%3D%220%200%2024%2024%22%20fill%3D%22none%22%20stroke%3D%22%239ca3af%22%20stroke-width%3D%222%22%3E%3Cpath%20d%3D%22m6%209%206%206%206-6%22%2F%3E%3C%2Fsvg%3E')] dark:text-white dark:shadow-none dark:focus:border-blue-400 dark:focus:ring-blue-400"
                 >
@@ -431,7 +493,7 @@ export default function SubscriptionPlansPage() {
                 </label>
                 <select
                   required
-                  value={formData.billingFrequency}
+                  value={formData.billingFrequency || 'MONTHLY'}
                   onChange={(e) => setFormData({ ...formData, billingFrequency: e.target.value as BillingFrequency })}
                   className="mt-1 w-full appearance-none rounded-lg border border-gray-300 bg-white bg-[url('data:image/svg+xml;charset=UTF-8,%3Csvg%20xmlns%3D%22http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%22%20viewBox%3D%220%200%2024%2024%22%20fill%3D%22none%22%20stroke%3D%22%236b7280%22%20stroke-width%3D%222%22%3E%3Cpath%20d%3D%22m6%209%206%206%206-6%22%2F%3E%3C%2Fsvg%3E')] bg-[length:1.5em_1.5em] bg-[right_0.75rem_center] bg-no-repeat px-3 py-2 pr-10 text-sm text-gray-900 shadow-sm focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500 dark:border-gray-600 dark:bg-gray-800 dark:bg-[url('data:image/svg+xml;charset=UTF-8,%3Csvg%20xmlns%3D%22http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%22%20viewBox%3D%220%200%2024%2024%22%20fill%3D%22none%22%20stroke%3D%22%239ca3af%22%20stroke-width%3D%222%22%3E%3Cpath%20d%3D%22m6%209%206%206%206-6%22%2F%3E%3C%2Fsvg%3E')] dark:text-white dark:shadow-none dark:focus:border-blue-400 dark:focus:ring-blue-400"
                 >
@@ -472,7 +534,7 @@ export default function SubscriptionPlansPage() {
                     <>
                       <select
                         required
-                        value={formData.pricingInfo.currency}
+                        value={formData.pricingInfo?.currency || ''}
                         onChange={(e) => setFormData({
                           ...formData,
                           pricingInfo: { ...formData.pricingInfo, currency: e.target.value }
@@ -514,7 +576,7 @@ export default function SubscriptionPlansPage() {
                 Description
               </label>
               <textarea
-                value={formData.description}
+                value={formData.description || ''}
                 onChange={(e) => setFormData({ ...formData, description: e.target.value })}
                 rows={3}
                 className="mt-1 w-full rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm text-gray-900 shadow-sm focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500 dark:border-gray-600 dark:bg-gray-800 dark:text-white dark:shadow-none dark:focus:border-blue-400 dark:focus:ring-blue-400"
@@ -596,13 +658,24 @@ export default function SubscriptionPlansPage() {
                               <span>Discount: {benefit.discountPercent}%</span>
                             </div>
                           </div>
-                          <button
-                            type="button"
-                            onClick={() => removeBenefit(index)}
-                            className="ml-2 text-red-600 hover:text-red-700 dark:text-red-400 dark:hover:text-red-300"
-                          >
-                            ✕
-                          </button>
+                          <div className="flex gap-2">
+                            <button
+                              type="button"
+                              onClick={() => startEditingBenefit(index)}
+                              className="text-blue-600 hover:text-blue-700 dark:text-blue-400 dark:hover:text-blue-300"
+                              title="Edit benefit"
+                            >
+                              ✏️
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => removeBenefit(index)}
+                              className="text-red-600 hover:text-red-700 dark:text-red-400 dark:hover:text-red-300"
+                              title="Remove benefit"
+                            >
+                              ✕
+                            </button>
+                          </div>
                         </div>
                       </div>
                     ))}
@@ -680,13 +753,24 @@ export default function SubscriptionPlansPage() {
                       </label>
                     </div>
                   </div>
-                  <button
-                    type="button"
-                    onClick={addBenefit}
-                    className="w-full rounded-lg bg-blue-600 px-4 py-2 text-sm text-white hover:bg-blue-700 dark:bg-blue-500 dark:hover:bg-blue-600"
-                  >
-                    Add Benefit
-                  </button>
+                  <div className="flex gap-2">
+                    {editingBenefitIndex !== null && (
+                      <button
+                        type="button"
+                        onClick={cancelEditingBenefit}
+                        className="flex-1 rounded-lg border border-gray-300 bg-white px-4 py-2 text-sm text-gray-700 hover:bg-gray-50 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-300 dark:hover:bg-gray-700"
+                      >
+                        Cancel
+                      </button>
+                    )}
+                    <button
+                      type="button"
+                      onClick={addBenefit}
+                      className="flex-1 rounded-lg bg-blue-600 px-4 py-2 text-sm text-white hover:bg-blue-700 dark:bg-blue-500 dark:hover:bg-blue-600"
+                    >
+                      {editingBenefitIndex !== null ? 'Update Benefit' : 'Add Benefit'}
+                    </button>
+                  </div>
                 </div>
               </div>
             </div>

@@ -630,6 +630,8 @@ export default function PaymentLinksPage() {
               })),
               notes: invoiceData.notes || undefined,
               tax: parseFloat(invoiceData.tax) || 0,
+              discountRate: (parseFloat(invoiceData.discountPercentage) || 0) / 100,
+              amountPaid: parseFloat(invoiceData.amountPaid) || 0,
               currencyId: invoiceData.currencyId,
               countryId: invoiceData.countryId,
               customerInfo: {

@@ -8,14 +8,15 @@ export default auth((req) => {
 export const config = {
   matcher: [
     /*
-     * Match all request paths except for the ones starting with:
-     * - api/auth (authentication routes)
-     * - _next/static (static files)
-     * - _next/image (image optimization files)
-     * - favicon.ico (favicon file)
-     * - public files (public folder)
+     * Match all request paths except:
+     * - /api/* and /api (NextAuth + Next.js API proxy — must not run page auth on fetches)
+     * - /_next* (static chunks, CSS, RSC, HMR). Use _next prefix (not only _next/) so /_next
+     *   does not hit auth and return HTML instead of assets (broken layout / hydration).
+     * - /__nextjs* (Next.js dev overlay)
+     * - favicon and common static file extensions
+     * Use api/ not "api" so paths like /apiculture are not accidentally excluded.
      */
-    "/((?!api/auth|_next/static|_next/image|favicon.ico|.*\\.(?:svg|png|jpg|jpeg|gif|webp)$).*)",
+    "/((?!api/|api$|_next|__nextjs|favicon\\.ico|.*\\.(?:svg|png|jpg|jpeg|gif|webp)$).*)",
   ],
 };
 

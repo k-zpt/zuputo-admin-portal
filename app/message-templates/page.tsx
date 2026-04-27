@@ -3,6 +3,7 @@
 import { AdminLayout } from "@/components/AdminLayout";
 import { messageTemplateService } from "@/lib/api/services";
 import { PREDEFINED_VARIABLES } from "@/lib/messageTemplateVariables";
+import { formatDate } from "@/lib/format";
 import { useState, useEffect, useRef } from "react";
 import type { MessageTemplate, CreateMessageTemplatePayload, UpdateMessageTemplatePayload, ApiResponse } from "@/lib/api/types";
 
@@ -720,7 +721,7 @@ export default function MessageTemplatesPage() {
                                 </div>
                                 {template.created && (
                                   <p className="mt-1 text-xs text-gray-400 dark:text-gray-500">
-                                    Created: {new Date(template.created).toLocaleDateString()}
+                                    Created: {formatDate(template.created)}
                                   </p>
                                 )}
                               </div>

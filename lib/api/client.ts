@@ -49,9 +49,13 @@ class ApiClient {
     return response.json();
   }
 
-  async get<T>(endpoint: string, params?: Record<string, string | number | boolean | undefined>): Promise<ApiResponse<T>> {
+  async get<T>(
+    endpoint: string,
+    params?: Record<string, string | number | boolean | undefined>,
+    init?: RequestInit
+  ): Promise<ApiResponse<T>> {
     const url = new URL(endpoint, 'http://dummy.com');
-    
+
     if (params) {
       Object.entries(params).forEach(([key, value]) => {
         if (value !== undefined && value !== null) {
@@ -61,7 +65,7 @@ class ApiClient {
     }
 
     const queryString = url.search ? `?${url.searchParams.toString()}` : '';
-    return this.request<T>(endpoint + queryString);
+    return this.request<T>(endpoint + queryString, init);
   }
 
   async post<T>(endpoint: string, data?: FormData | unknown): Promise<ApiResponse<T>> {

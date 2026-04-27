@@ -25,8 +25,10 @@ export interface Country {
   id: string;
   name: string;
   code: string;
-  currencies: Currency[]; // API always returns Currency objects, not strings
+  currencies: Currency[]; // API typically returns Currency objects, not strings
   defaultCurrency?: Currency | null;
+  /** Same as `defaultCurrency` when the backend uses snake_case JSON keys. */
+  default_currency?: Currency | string | null;
 }
 
 export interface CreateCountryPayload {
@@ -76,6 +78,8 @@ export interface CustomerSubscription {
 export interface CustomerProfile extends Omit<Customer, 'country'> {
   country?: string | Country; // Can be string ID or full Country object
   subscription?: CustomerSubscription | null;
+  /** Optional; backend may return entity ids or objects for linking usage, etc. */
+  entities?: string[] | Array<{ id: string; name?: string; [key: string]: unknown }>;
   [key: string]: any; // Allow for additional profile fields
 }
 
@@ -94,6 +98,18 @@ export interface SubscriptionUsage {
 
 export interface UpdateSubscriptionUsagePayload {
   service_request_id: string;
+}
+
+/** POST /api/v2/customers/{id}/subscription/usage */
+export interface AddSubscriptionUsagePayload {
+  type: string;
+  status?: string;
+  entity_id?: string;
+  pricingInfo?: {
+    price: number;
+    currency: string;
+  };
+  context?: Record<string, unknown>;
 }
 
 // Form types
@@ -332,7 +348,7 @@ export interface SubscriptionPlan {
 }
 
 export interface CreateSubscriptionPlanPayload {
-  code: string;
+  code?: string;
   label: string;
   country: string;
   active: boolean;
@@ -471,17 +487,48 @@ export interface ServiceRequestInvoice {
   created?: string;
 }
 
+/** Single entry in a service request's status change log. */
+export interface ServiceRequestStatusLogEntry {
+  status?: string;
+  fromStatus?: string;
+  toStatus?: string;
+  /** When this status was set (API may use created, timestamp, or at). */
+  created?: string;
+  timestamp?: string;
+  at?: string;
+  updatedBy?: string;
+  by?: string;
+  /** Free-text note (API may use notes or note). */
+  notes?: string | null;
+  note?: string;
+  [key: string]: unknown;
+}
+
 export interface ServiceRequest {
   id: string;
   type: string;
   status: string;
-  pricingInfo: {
+  pricingInfo?: {
     price: string;
     currency: Currency;
-  };
+  } | null;
   context?: ServiceRequestContext;
   entity?: ServiceRequestEntity;
   invoice?: ServiceRequestInvoice;
+  created?: string;
+  modified?: string;
+  /** Status change history (API may use statusLogs, statusLog, or status_log). */
+  statusLogs?: ServiceRequestStatusLogEntry[];
+  statusLog?: ServiceRequestStatusLogEntry[];
+}
+
+export interface UpdateServiceRequestPayload {
+  status: string;
+  notes?: string;
+  pricingInfo?: {
+    price: number;
+    currency: string; // Currency id (never use label/code)
+  };
 }
 
 // Discount Program types
@@ -589,4 +636,38 @@ export interface CreateOfflineInvoicePayload {
   invoiceInfo: OfflineInvoicePayload;
   emailInfo: EmailInfoPayload;
 }
+
+// System / background jobs
+/** Response shape for GET /api/v2/system/jobs/config (backend may extend fields). */
+export type BackgroundJobConfig = Record<string, unknown>;
+
+export const SYSTEM_JOB_STATUSES = ['ACTIVE', 'PAUSED', 'DISABLED'] as const;
+export type SystemJobStatus = (typeof SYSTEM_JOB_STATUSES)[number];
+
+export interface UpdateRenewalOffsetsPayload {
+  offsets: number[];
+}
+
+export interface UpdateJobSpawnTimePayload {
+  hour: number;
+  minute: number;
+}
+
+export interface CreateBackgroundJobPayload {
+  name: string;
+  description: string;
+  status: SystemJobStatus;
+}
+
+/** Response for POST /api/v2/system/jobs (fields depend on backend). */
+export type BackgroundJob = Record<string, unknown>;
+
+/** Single job from GET /api/v2/system/jobs (shape may vary by backend). */
+export type SystemJobRecord = {
+  id?: string;
+  name?: string;
+  description?: string;
+  status?: string;
+  [key: string]: unknown;
+};
 

@@ -1,4 +1,7 @@
 @import "tailwindcss";
+/* Explicit roots so utilities are generated even if v4 auto-scan misses files (e.g. monorepo cwd). */
+@source ".";
+@source "../components";
 
 :root {
   --background: #ffffff;

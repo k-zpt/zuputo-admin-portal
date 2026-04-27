@@ -1,11 +1,180 @@
 'use client';
 
 import { AdminLayout } from "@/components/AdminLayout";
-import { customerService, serviceRequestService } from "@/lib/api/services";
+import { countryService, customerService, serviceRequestService, currencyService } from "@/lib/api/services";
+import { formatTypeLabel, formatStatusLabel } from "@/lib/serviceRequestLabels";
+import { formatAmount, formatDate } from "@/lib/format";
 import { useState, useEffect } from "react";
 import { useParams, useRouter } from "next/navigation";
 import Link from "next/link";
-import type { CustomerProfile, ServiceRequest, ApiResponse, SubscriptionUsage } from "@/lib/api/types";
+import type { Country, CustomerProfile, ServiceRequest, ApiResponse, SubscriptionUsage, AddSubscriptionUsagePayload, Currency } from "@/lib/api/types";
+
+const USAGE_ADD_SERVICE_TYPES = [
+  { value: 'AD_HOC', label: 'Ad Hoc' },
+  { value: 'IP_REGISTRATION', label: 'IP Registration' },
+  { value: 'TRADEMARK_REGISTRATION', label: 'Trademark Registration' },
+  { value: 'CONTRACT_REQUEST', label: 'Contract Request' },
+  { value: 'CONTRACT_REVIEW', label: 'Contract Review' },
+  { value: 'COMPANY_INCORPORATION', label: 'Company Incorporation' },
+  { value: 'SOLE_PROPRIETORSHIP_INCORPORATION', label: 'Sole Proprietorship Incorporation' },
+  { value: 'LEGAL_CONSULTATION', label: 'Legal Consultation' },
+] as const;
+
+const USAGE_ADD_STATUSES = [
+  'DRAFT', 'RECEIVED', 'ACKNOWLEDGED', 'PENDING_ASSESSMENT', 'PENDING_PAYMENT',
+  'IN_PROGRESS', 'UNDER_REVIEW', 'TRANSFERRED', 'COMPLETED',
+] as const;
+
+function formatCustomerEntityLabel(row: Record<string, unknown>): string {
+  if (typeof row.name === 'string' && row.name.trim()) return row.name.trim();
+  const parts = [row.firstName, row.otherNames, row.lastName].filter(
+    (x): x is string => typeof x === 'string' && x.trim() !== ''
+  );
+  if (parts.length) return parts.join(' ');
+  if (typeof row.emailAddress === 'string' && row.emailAddress.trim()) return row.emailAddress.trim();
+  if (typeof row.type === 'string' && row.type.trim()) {
+    const id = row.id ?? row._id;
+    return `${row.type.trim()} (${String(id ?? '')})`.replace(/\s+\(\)$/, '');
+  }
+  return String(row.id ?? row._id ?? 'Entity');
+}
+
+function normalizeEntityListRows(data: unknown): Record<string, unknown>[] {
+  if (Array.isArray(data)) return data as Record<string, unknown>[];
+  if (data && typeof data === 'object' && Array.isArray((data as { data?: unknown }).data)) {
+    return (data as { data: Record<string, unknown>[] }).data;
+  }
+  if (data && typeof data === 'object' && Array.isArray((data as { items?: unknown }).items)) {
+    return (data as { items: Record<string, unknown>[] }).items;
+  }
+  return [];
+}
+
+function entityRowIsDefault(row: Record<string, unknown>): boolean {
+  if (row.isDefault === true) return true;
+  if (row.is_default === true) return true;
+  return false;
+}
+
+/** Prefer row with isDefault; otherwise first row with a valid id. */
+function pickDefaultEntityIdFromRows(rows: Record<string, unknown>[]): string {
+  const withIds = rows.filter((row) => String(row.id ?? row._id ?? '').trim());
+  if (withIds.length === 0) return '';
+  const def = withIds.find(entityRowIsDefault);
+  const chosen = def ?? withIds[0];
+  return String(chosen.id ?? chosen._id ?? '').trim();
+}
+
+/** Reads default currency id or code from an expanded Country object. */
+function extractDefaultCurrencyHintFromCountry(c: Country): string {
+  const raw = c.defaultCurrency ?? c.default_currency;
+  if (raw == null) return '';
+  if (typeof raw === 'string') return raw.trim();
+  if (typeof raw === 'object') {
+    const id = (raw as { id?: unknown }).id;
+    if (typeof id === 'string' && id.trim()) return id.trim();
+    if (typeof id === 'number' && Number.isFinite(id)) return String(id);
+    const code = (raw as { code?: unknown }).code;
+    if (typeof code === 'string' && code.trim()) return code.trim();
+  }
+  return '';
+}
+
+/** Match API hint (currency id or ISO code) to a row in the portal currency list. */
+function pickCurrencyIdFromList(hint: string, currencyList: Currency[]): string {
+  const w = hint.trim();
+  if (!w || currencyList.length === 0) return '';
+  const byId = currencyList.find((cur) => cur.id === w);
+  if (byId) return byId.id;
+  const byCode = currencyList.find((cur) => cur.code.toUpperCase() === w.toUpperCase());
+  if (byCode) return byCode.id;
+  return '';
+}
+
+/**
+ * Resolves the customer's default currency id for the usage form.
+ * Profile often has `country` as a string id only — then we fetch `/api/v1/countries/{id}`.
+ */
+async function resolveDefaultCurrencyForCustomer(
+  country: CustomerProfile['country'] | undefined,
+  currencyList: Currency[]
+): Promise<string> {
+  let c: Country | null = null;
+  if (!country) return '';
+  if (typeof country === 'object' && country !== null) {
+    c = country as Country;
+  } else if (typeof country === 'string' && country.trim()) {
+    try {
+      const res = await countryService.getById(country.trim());
+      c = res.data;
+    } catch {
+      return '';
+    }
+  }
+  if (!c) return '';
+  const hint = extractDefaultCurrencyHintFromCountry(c);
+  return pickCurrencyIdFromList(hint, currencyList);
+}
+
+type UsageContextKvRow = { id: string; key: string; value: string };
+
+function newUsageContextKvRow(): UsageContextKvRow {
+  const id =
+    typeof crypto !== 'undefined' && 'randomUUID' in crypto
+      ? crypto.randomUUID()
+      : `ctx-${Date.now()}-${Math.random().toString(36).slice(2, 9)}`;
+  return { id, key: '', value: '' };
+}
+
+/** First row seeds key `notes` (user may delete or rename). */
+function defaultUsageContextRows(): UsageContextKvRow[] {
+  const r = newUsageContextKvRow();
+  r.key = 'notes';
+  return [r];
+}
+
+function rowUsesNotesValueEditor(row: UsageContextKvRow): boolean {
+  return row.key.trim().toLowerCase() === 'notes';
+}
+
+function coerceContextValueFromString(raw: string): unknown {
+  const t = raw.trim();
+  if (t === 'true') return true;
+  if (t === 'false') return false;
+  if (t === 'null') return null;
+  if (/^-?\d+$/.test(t)) return parseInt(t, 10);
+  if (/^-?\d+\.\d+$/.test(t) || /^-?\d+\.$/.test(t)) return parseFloat(t);
+  if ((t.startsWith('{') && t.endsWith('}')) || (t.startsWith('[') && t.endsWith(']'))) {
+    try {
+      return JSON.parse(t) as unknown;
+    } catch {
+      return raw;
+    }
+  }
+  return raw;
+}
+
+function buildContextFromKvRows(rows: UsageContextKvRow[]): Record<string, unknown> | undefined {
+  const out: Record<string, unknown> = {};
+  for (const row of rows) {
+    const k = row.key.trim();
+    if (!k) continue;
+    if (row.value.trim() === '') continue;
+    out[k] = k.toLowerCase() === 'notes' ? row.value : coerceContextValueFromString(row.value);
+  }
+  return Object.keys(out).length > 0 ? out : undefined;
+}
+
+function contextObjectToKvRows(obj: Record<string, unknown>): UsageContextKvRow[] {
+  return Object.entries(obj).map(([key, val]) => ({
+    id:
+      typeof crypto !== 'undefined' && 'randomUUID' in crypto
+        ? crypto.randomUUID()
+        : `ctx-${Date.now()}-${Math.random().toString(36).slice(2, 9)}`,
+    key,
+    value: typeof val === 'string' ? val : JSON.stringify(val),
+  }));
+}
 
 export default function CustomerDetailPage() {
   const params = useParams();
@@ -31,6 +200,76 @@ export default function CustomerDetailPage() {
   const [showUpdateUsageModal, setShowUpdateUsageModal] = useState(false);
   const [selectedServiceRequestForUsage, setSelectedServiceRequestForUsage] = useState<ServiceRequest | null>(null);
   const [updatingUsage, setUpdatingUsage] = useState(false);
+  const [showAddUsageModal, setShowAddUsageModal] = useState(false);
+  const [addUsageSubmitting, setAddUsageSubmitting] = useState(false);
+  const [usageCurrencies, setUsageCurrencies] = useState<Currency[]>([]);
+  const [usageEntityOptions, setUsageEntityOptions] = useState<{ id: string; label: string }[]>([]);
+  const [loadingUsageEntities, setLoadingUsageEntities] = useState(false);
+  const [addUsageForm, setAddUsageForm] = useState({
+    type: '',
+    status: 'COMPLETED',
+    entity_id: '',
+    price: '',
+    currency: '',
+    contextMode: 'kv' as 'kv' | 'json',
+    contextKvRows: defaultUsageContextRows(),
+    contextJson: '',
+  });
+
+  useEffect(() => {
+    if (!showAddUsageModal) return;
+    let cancelled = false;
+    setUsageEntityOptions([]);
+    (async () => {
+      let currencyList: Currency[] = [];
+      try {
+        const res: ApiResponse<Currency[]> = await currencyService.list({ limit: 100 });
+        if (!cancelled) {
+          currencyList = Array.isArray(res.data) ? res.data : [];
+          setUsageCurrencies(currencyList);
+        }
+      } catch {
+        if (!cancelled) setUsageCurrencies([]);
+      }
+
+      let rows: Record<string, unknown>[] = [];
+      setLoadingUsageEntities(true);
+      try {
+        const listRes = await customerService.listCustomerEntities(customerId);
+        if (!cancelled) {
+          rows = normalizeEntityListRows(listRes.data);
+        }
+      } catch {
+        /* list failed */
+      } finally {
+        if (!cancelled) setLoadingUsageEntities(false);
+      }
+
+      if (cancelled) return;
+
+      const options = rows
+        .map((row) => ({
+          id: String(row.id ?? row._id ?? '').trim(),
+          label: formatCustomerEntityLabel(row),
+        }))
+        .filter((o) => o.id);
+      setUsageEntityOptions(options);
+
+      const defaultEntityId = options.length > 0 ? pickDefaultEntityIdFromRows(rows) : '';
+      const defaultCurrencyId = profile
+        ? await resolveDefaultCurrencyForCustomer(profile.country, currencyList)
+        : '';
+
+      setAddUsageForm((prev) => ({
+        ...prev,
+        entity_id: defaultEntityId,
+        currency: prev.currency === '' && defaultCurrencyId ? defaultCurrencyId : prev.currency,
+      }));
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [showAddUsageModal, customerId, profile]);
 
   useEffect(() => {
     const loadProfile = async () => {
@@ -87,6 +326,69 @@ export default function CustomerDetailPage() {
     }
   };
 
+  const handleAddSubscriptionUsage = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!addUsageForm.type.trim()) {
+      setError('Select a service request type.');
+      return;
+    }
+    const priceTrim = addUsageForm.price.trim();
+    const price = priceTrim === '' ? NaN : parseFloat(priceTrim);
+    const hasPricing = priceTrim !== '' && Number.isFinite(price);
+    if (hasPricing && !addUsageForm.currency.trim()) {
+      setError('Select a currency when a price is set.');
+      return;
+    }
+    let context: Record<string, unknown> | undefined;
+    if (addUsageForm.contextMode === 'json') {
+      if (addUsageForm.contextJson.trim()) {
+        try {
+          const parsed = JSON.parse(addUsageForm.contextJson) as unknown;
+          if (parsed === null || typeof parsed !== 'object' || Array.isArray(parsed)) {
+            setError('Context must be a JSON object.');
+            return;
+          }
+          context = parsed as Record<string, unknown>;
+        } catch {
+          setError('Context must be valid JSON.');
+          return;
+        }
+      }
+    } else {
+      context = buildContextFromKvRows(addUsageForm.contextKvRows);
+    }
+    const payload: AddSubscriptionUsagePayload = {
+      type: addUsageForm.type.trim(),
+      status: addUsageForm.status || 'COMPLETED',
+    };
+    if (addUsageForm.entity_id.trim()) payload.entity_id = addUsageForm.entity_id.trim();
+    if (hasPricing) {
+      payload.pricingInfo = { price, currency: addUsageForm.currency.trim() };
+    }
+    if (context) payload.context = context;
+    try {
+      setAddUsageSubmitting(true);
+      setError(null);
+      await customerService.addSubscriptionUsage(customerId, payload);
+      setShowAddUsageModal(false);
+      setAddUsageForm({
+        type: '',
+        status: 'COMPLETED',
+        entity_id: '',
+        price: '',
+        currency: '',
+        contextMode: 'kv',
+        contextKvRows: defaultUsageContextRows(),
+        contextJson: '',
+      });
+      await loadSubscriptionUsage();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to add subscription usage');
+    } finally {
+      setAddUsageSubmitting(false);
+    }
+  };
+
   useEffect(() => {
     const loadServiceRequests = async () => {
       try {
@@ -122,9 +424,9 @@ export default function CustomerDetailPage() {
             return bPaid - aPaid; // Paid first
           }
           
-          // Second: most recent first (use modified or created date)
-          const aDate = a.context?.modified || a.context?.created || '';
-          const bDate = b.context?.modified || b.context?.created || '';
+          // Second: most recent first (use created/modified from root, context, or invoice)
+          const aDate = a.created || a.context?.modified || a.context?.created || a.invoice?.created || '';
+          const bDate = b.created || b.context?.modified || b.context?.created || b.invoice?.created || '';
           if (aDate && bDate) {
             const dateCompare = new Date(bDate).getTime() - new Date(aDate).getTime();
             if (dateCompare !== 0) {
@@ -195,21 +497,6 @@ export default function CustomerDetailPage() {
     return parts.length > 0 ? parts.join(' ') : customer.emailAddress || 'N/A';
   };
 
-  const formatDate = (dateString?: string): string => {
-    if (!dateString) return 'N/A';
-    try {
-      return new Date(dateString).toLocaleDateString('en-US', {
-        year: 'numeric',
-        month: 'short',
-        day: 'numeric',
-        hour: '2-digit',
-        minute: '2-digit',
-      });
-    } catch {
-      return dateString;
-    }
-  };
-
   const formatPrice = (pricingInfo?: ServiceRequest['pricingInfo']): string => {
     if (!pricingInfo) return 'N/A';
     const currency = pricingInfo.currency 
@@ -217,7 +504,7 @@ export default function CustomerDetailPage() {
           ? pricingInfo.currency.code 
           : pricingInfo.currency)
       : 'N/A';
-    const price = pricingInfo.price || 'N/A';
+    const price = pricingInfo.price != null ? formatAmount(pricingInfo.price) : 'N/A';
     return `${currency} ${price}`;
   };
 
@@ -344,15 +631,39 @@ export default function CustomerDetailPage() {
             <div className="border-b border-gray-200 px-6 py-4 dark:border-gray-700">
               <div className="flex items-center justify-between">
                 <h2 className="text-xl font-semibold text-gray-900 dark:text-white">Subscription Usage</h2>
-                <button
-                  onClick={() => {
-                    setShowUpdateUsageModal(true);
-                    setSelectedServiceRequestForUsage(null);
-                  }}
-                  className="rounded-lg bg-blue-600 px-4 py-2 text-sm text-white hover:bg-blue-700 dark:bg-blue-500 dark:hover:bg-blue-600"
-                >
-                  Update Usage
-                </button>
+                <div className="flex flex-wrap items-center gap-2">
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setError(null);
+                      setAddUsageForm({
+                        type: '',
+                        status: 'COMPLETED',
+                        entity_id: '',
+                        price: '',
+                        currency: '',
+                        contextMode: 'kv',
+                        contextKvRows: defaultUsageContextRows(),
+                        contextJson: '',
+                      });
+                      setUsageEntityOptions([]);
+                      setShowAddUsageModal(true);
+                    }}
+                    className="rounded-lg border border-gray-300 bg-white px-4 py-2 text-sm font-medium text-gray-700 hover:bg-gray-50 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-200 dark:hover:bg-gray-700"
+                  >
+                    Add usage
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      setShowUpdateUsageModal(true);
+                      setSelectedServiceRequestForUsage(null);
+                    }}
+                    className="rounded-lg bg-blue-600 px-4 py-2 text-sm text-white hover:bg-blue-700 dark:bg-blue-500 dark:hover:bg-blue-600"
+                  >
+                    Update Usage
+                  </button>
+                </div>
               </div>
             </div>
 
@@ -549,12 +860,12 @@ export default function CustomerDetailPage() {
                           </td>
                           <td className="whitespace-nowrap px-6 py-4 text-sm text-gray-600 dark:text-gray-400">
                             <span className="rounded-full bg-blue-100 px-2 py-1 text-xs font-medium text-blue-800 dark:bg-blue-900/30 dark:text-blue-200">
-                              {request.type}
+                              {formatTypeLabel(request.type)}
                             </span>
                           </td>
                           <td className="whitespace-nowrap px-6 py-4 text-sm text-gray-600 dark:text-gray-400">
                             <span className="rounded-full bg-green-100 px-2 py-1 text-xs font-medium text-green-800 dark:bg-green-900/30 dark:text-green-200">
-                              {request.status}
+                              {formatStatusLabel(request.status)}
                             </span>
                           </td>
                           <td className="px-6 py-4 text-sm text-gray-900 dark:text-white">
@@ -582,7 +893,7 @@ export default function CustomerDetailPage() {
                             )}
                           </td>
                           <td className="whitespace-nowrap px-6 py-4 text-sm text-gray-600 dark:text-gray-400">
-                            {formatDate(request.context?.modified || request.context?.created)}
+                            {formatDate(request.created ?? request.modified)}
                           </td>
                         </tr>
                       ))
@@ -670,16 +981,16 @@ export default function CustomerDetailPage() {
                           <p className="mt-1 text-sm text-gray-900 dark:text-white">{selectedServiceRequest.context.description}</p>
                         </div>
                       )}
-                      {selectedServiceRequest.context.created && (
+                      {(selectedServiceRequest.context?.created ?? selectedServiceRequest.created) && (
                         <div>
                           <label className="text-sm font-medium text-gray-500 dark:text-gray-400">Created</label>
-                          <p className="mt-1 text-sm text-gray-900 dark:text-white">{formatDate(selectedServiceRequest.context.created)}</p>
+                          <p className="mt-1 text-sm text-gray-900 dark:text-white">{formatDate(selectedServiceRequest.context?.created ?? selectedServiceRequest.created)}</p>
                         </div>
                       )}
-                      {selectedServiceRequest.context.modified && (
+                      {(selectedServiceRequest.context?.modified ?? selectedServiceRequest.modified) && (
                         <div>
                           <label className="text-sm font-medium text-gray-500 dark:text-gray-400">Modified</label>
-                          <p className="mt-1 text-sm text-gray-900 dark:text-white">{formatDate(selectedServiceRequest.context.modified)}</p>
+                          <p className="mt-1 text-sm text-gray-900 dark:text-white">{formatDate(selectedServiceRequest.context?.modified ?? selectedServiceRequest.modified)}</p>
                         </div>
                       )}
                     </div>
@@ -732,7 +1043,7 @@ export default function CustomerDetailPage() {
                               ? (typeof selectedServiceRequest.invoice.pricing.currency === 'object' 
                                   ? selectedServiceRequest.invoice.pricing.currency.code 
                                   : selectedServiceRequest.invoice.pricing.currency)
-                              : 'N/A'} {selectedServiceRequest.invoice.pricing.total || 'N/A'}
+                              : 'N/A'} {selectedServiceRequest.invoice.pricing.total != null ? formatAmount(selectedServiceRequest.invoice.pricing.total) : 'N/A'}
                           </p>
                         </div>
                       )}
@@ -740,6 +1051,410 @@ export default function CustomerDetailPage() {
                   </div>
                 )}
               </div>
+            </div>
+          </div>
+        )}
+
+        {/* Add Subscription Usage Modal */}
+        {showAddUsageModal && (
+          <div
+            className="fixed inset-0 z-50 flex items-center justify-center bg-black/50 px-4 py-8 backdrop-blur-[2px]"
+            onClick={() => !addUsageSubmitting && setShowAddUsageModal(false)}
+          >
+            <div
+              className="relative m-auto w-full max-w-xl max-h-[min(90vh,760px)] overflow-y-auto rounded-2xl border border-gray-200/80 bg-white shadow-2xl ring-1 ring-black/5 dark:border-gray-700 dark:bg-gray-900 dark:ring-white/10"
+              onClick={(e) => e.stopPropagation()}
+            >
+              <div className="sticky top-0 z-10 flex items-start justify-between gap-4 border-b border-gray-100 bg-white/90 px-6 py-5 backdrop-blur-md dark:border-gray-800 dark:bg-gray-900/90">
+                <div>
+                  <h2 className="text-xl font-semibold tracking-tight text-gray-900 dark:text-white">
+                    Add subscription usage
+                  </h2>
+                  <p className="mt-1 max-w-md text-sm leading-relaxed text-gray-500 dark:text-gray-400">
+                    Record usage against this customer&apos;s subscription. Fields below pricing are optional.
+                  </p>
+                </div>
+                <button
+                  type="button"
+                  disabled={addUsageSubmitting}
+                  onClick={() => setShowAddUsageModal(false)}
+                  className="shrink-0 rounded-full p-2 text-gray-400 transition-colors hover:bg-gray-100 hover:text-gray-700 disabled:opacity-50 dark:hover:bg-gray-800 dark:hover:text-gray-200"
+                  aria-label="Close"
+                >
+                  <svg className="h-5 w-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                    <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" />
+                  </svg>
+                </button>
+              </div>
+              <form onSubmit={handleAddSubscriptionUsage} className="space-y-5 p-6 sm:p-8">
+                {error && (
+                  <div className="rounded-xl border border-red-200 bg-red-50/90 p-4 text-sm text-red-800 shadow-sm dark:border-red-900/50 dark:bg-red-950/30 dark:text-red-200">
+                    {error}
+                  </div>
+                )}
+                <div>
+                  <label className="mb-1.5 block text-sm font-medium text-gray-700 dark:text-gray-300">Type *</label>
+                  <select
+                    required
+                    value={addUsageForm.type}
+                    onChange={(e) => setAddUsageForm((f) => ({ ...f, type: e.target.value }))}
+                    className="w-full rounded-lg border border-gray-300 bg-white px-3 py-2.5 text-sm text-gray-900 shadow-sm transition-colors focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-500/20 dark:border-gray-600 dark:bg-gray-800/80 dark:text-white"
+                  >
+                    <option value="">Select type</option>
+                    {USAGE_ADD_SERVICE_TYPES.map((t) => (
+                      <option key={t.value} value={t.value}>
+                        {t.label}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+                <div>
+                  <label className="mb-1.5 block text-sm font-medium text-gray-700 dark:text-gray-300">Status</label>
+                  <select
+                    value={addUsageForm.status}
+                    onChange={(e) => setAddUsageForm((f) => ({ ...f, status: e.target.value }))}
+                    className="w-full rounded-lg border border-gray-300 bg-white px-3 py-2.5 text-sm text-gray-900 shadow-sm transition-colors focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-500/20 dark:border-gray-600 dark:bg-gray-800/80 dark:text-white"
+                  >
+                    {USAGE_ADD_STATUSES.map((s) => (
+                      <option key={s} value={s}>
+                        {s}
+                      </option>
+                    ))}
+                  </select>
+                  <p className="mt-1.5 text-xs leading-relaxed text-gray-500 dark:text-gray-400">
+                    Defaults to COMPLETED if unchanged.
+                  </p>
+                </div>
+                <div>
+                  <label className="mb-1.5 block text-sm font-medium text-gray-700 dark:text-gray-300">Entity</label>
+                  <select
+                    value={addUsageForm.entity_id}
+                    onChange={(e) => setAddUsageForm((f) => ({ ...f, entity_id: e.target.value }))}
+                    disabled={loadingUsageEntities}
+                    className="w-full rounded-lg border border-gray-300 bg-white px-3 py-2.5 text-sm text-gray-900 shadow-sm transition-colors focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-500/20 disabled:cursor-not-allowed disabled:opacity-50 dark:border-gray-600 dark:bg-gray-800/80 dark:text-white"
+                  >
+                    <option value="">
+                      {loadingUsageEntities ? 'Loading entities…' : 'None (optional)'}
+                    </option>
+                    {usageEntityOptions.map((o) => (
+                      <option key={o.id} value={o.id}>
+                        {o.label}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+                <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+                  <div>
+                    <label className="mb-1.5 block text-sm font-medium text-gray-700 dark:text-gray-300">Currency</label>
+                    <select
+                      value={addUsageForm.currency}
+                      onChange={(e) => setAddUsageForm((f) => ({ ...f, currency: e.target.value }))}
+                      className="w-full rounded-lg border border-gray-300 bg-white px-3 py-2.5 text-sm text-gray-900 shadow-sm transition-colors focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-500/20 dark:border-gray-600 dark:bg-gray-800/80 dark:text-white"
+                    >
+                      <option value="">Select currency (if price set)</option>
+                      {usageCurrencies.map((c) => (
+                        <option key={c.id} value={c.id}>
+                          {c.code}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+                  <div>
+                    <label className="mb-1.5 block text-sm font-medium text-gray-700 dark:text-gray-300">Price</label>
+                    <input
+                      type="text"
+                      inputMode="decimal"
+                      value={addUsageForm.price}
+                      onChange={(e) => setAddUsageForm((f) => ({ ...f, price: e.target.value }))}
+                      className="w-full rounded-lg border border-gray-300 bg-white px-3 py-2.5 text-sm text-gray-900 shadow-sm transition-colors placeholder:text-gray-400 focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-500/20 dark:border-gray-600 dark:bg-gray-800/80 dark:text-white dark:placeholder:text-gray-500"
+                      placeholder="Optional"
+                    />
+                  </div>
+                </div>
+
+                <div className="rounded-2xl border border-gray-200 bg-gradient-to-b from-gray-50/90 to-white p-5 shadow-sm dark:border-gray-700 dark:from-gray-800/40 dark:to-gray-900/40 sm:p-6">
+                  <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
+                    <div>
+                      <p className="text-sm font-semibold text-gray-900 dark:text-white">Additional context</p>
+                      <p className="mt-0.5 text-xs leading-relaxed text-gray-500 dark:text-gray-400">
+                        Optional metadata. The <span className="font-medium text-gray-600 dark:text-gray-300">notes</span> field is
+                        multiline; other keys use a single line.
+                      </p>
+                    </div>
+                    <div className="flex shrink-0 rounded-xl bg-gray-200/80 p-1 dark:bg-gray-950/80">
+                      <button
+                        type="button"
+                        onClick={() =>
+                          setAddUsageForm((f) => {
+                            if (f.contextMode === 'kv') return f;
+                            const t = f.contextJson.trim();
+                            if (!t) {
+                              return { ...f, contextMode: 'kv', contextKvRows: defaultUsageContextRows() };
+                            }
+                            try {
+                              const parsed = JSON.parse(t) as unknown;
+                              if (
+                                parsed !== null &&
+                                typeof parsed === 'object' &&
+                                !Array.isArray(parsed)
+                              ) {
+                                const rows = contextObjectToKvRows(parsed as Record<string, unknown>);
+                                return {
+                                  ...f,
+                                  contextMode: 'kv',
+                                  contextKvRows: rows.length ? rows : defaultUsageContextRows(),
+                                };
+                              }
+                            } catch {
+                              /* invalid JSON */
+                            }
+                            return { ...f, contextMode: 'kv', contextKvRows: defaultUsageContextRows() };
+                          })
+                        }
+                        className={`rounded-lg px-4 py-2 text-xs font-semibold transition-all ${
+                          addUsageForm.contextMode === 'kv'
+                            ? 'bg-white text-gray-900 shadow-sm ring-1 ring-black/5 dark:bg-gray-700 dark:text-white dark:ring-white/10'
+                            : 'text-gray-600 hover:text-gray-900 dark:text-gray-400 dark:hover:text-white'
+                        }`}
+                      >
+                        Key / value
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() =>
+                          setAddUsageForm((f) => {
+                            if (f.contextMode === 'json') return f;
+                            const built = buildContextFromKvRows(f.contextKvRows);
+                            return {
+                              ...f,
+                              contextMode: 'json',
+                              contextJson: built ? JSON.stringify(built, null, 2) : '',
+                            };
+                          })
+                        }
+                        className={`rounded-lg px-4 py-2 text-xs font-semibold transition-all ${
+                          addUsageForm.contextMode === 'json'
+                            ? 'bg-white text-gray-900 shadow-sm ring-1 ring-black/5 dark:bg-gray-700 dark:text-white dark:ring-white/10'
+                            : 'text-gray-600 hover:text-gray-900 dark:text-gray-400 dark:hover:text-white'
+                        }`}
+                      >
+                        JSON
+                      </button>
+                    </div>
+                  </div>
+                  {addUsageForm.contextMode === 'kv' ? (
+                    <div className="mt-5 space-y-4">
+                      {addUsageForm.contextKvRows.length === 0 ? (
+                        <div className="flex flex-col items-center justify-center gap-3 rounded-xl border border-dashed border-gray-300 bg-white/70 py-12 text-center dark:border-gray-600 dark:bg-gray-900/50">
+                          <p className="text-sm text-gray-500 dark:text-gray-400">No optional context fields yet.</p>
+                          <button
+                            type="button"
+                            onClick={() =>
+                              setAddUsageForm((f) => ({
+                                ...f,
+                                contextKvRows: [...f.contextKvRows, newUsageContextKvRow()],
+                              }))
+                            }
+                            className="inline-flex items-center gap-2 rounded-lg border border-gray-300 bg-white px-4 py-2 text-sm font-medium text-gray-700 shadow-sm transition-colors hover:bg-gray-50 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-200 dark:hover:bg-gray-700"
+                          >
+                            <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden>
+                              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" />
+                            </svg>
+                            Add field
+                          </button>
+                        </div>
+                      ) : (
+                        addUsageForm.contextKvRows.map((row) => (
+                          <div
+                            key={row.id}
+                            className="overflow-hidden rounded-xl border border-gray-200 bg-white shadow-sm ring-1 ring-gray-900/[0.04] dark:border-gray-600 dark:bg-gray-900/60 dark:ring-white/[0.06]"
+                          >
+                            {rowUsesNotesValueEditor(row) ? (
+                              <>
+                                <div className="flex items-center justify-between gap-3 border-b border-gray-100 bg-gradient-to-r from-gray-50/90 to-transparent px-4 py-2.5 dark:border-gray-700 dark:from-gray-800/40">
+                                  <span className="text-sm font-semibold text-gray-900 dark:text-white">Notes</span>
+                                  <button
+                                    type="button"
+                                    title="Remove notes"
+                                    onClick={() =>
+                                      setAddUsageForm((f) => ({
+                                        ...f,
+                                        contextKvRows: f.contextKvRows.filter((r) => r.id !== row.id),
+                                      }))
+                                    }
+                                    className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg text-gray-400 transition-colors hover:bg-red-50 hover:text-red-600 dark:hover:bg-red-950/40 dark:hover:text-red-400"
+                                  >
+                                    <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                      <path
+                                        strokeLinecap="round"
+                                        strokeLinejoin="round"
+                                        strokeWidth={2}
+                                        d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"
+                                      />
+                                    </svg>
+                                  </button>
+                                </div>
+                                <div className="p-4">
+                                  <textarea
+                                    value={row.value}
+                                    onChange={(e) => {
+                                      const v = e.target.value;
+                                      setAddUsageForm((f) => ({
+                                        ...f,
+                                        contextKvRows: f.contextKvRows.map((r) =>
+                                          r.id === row.id ? { ...r, value: v } : r
+                                        ),
+                                      }));
+                                    }}
+                                    rows={4}
+                                    placeholder="Optional notes for this usage…"
+                                    className="w-full resize-y rounded-lg border border-gray-200 bg-white px-3 py-2.5 text-sm leading-relaxed text-gray-900 shadow-sm transition-colors placeholder:text-gray-400 focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-500/20 dark:border-gray-600 dark:bg-gray-900 dark:text-white dark:placeholder:text-gray-500"
+                                  />
+                                </div>
+                              </>
+                            ) : (
+                              <>
+                                <div className="flex items-end justify-between gap-3 border-b border-gray-100 bg-gradient-to-r from-gray-50/90 to-transparent px-4 py-3 dark:border-gray-700 dark:from-gray-800/40">
+                                  <div className="min-w-0 flex-1">
+                                    <label className="block text-[11px] font-semibold uppercase tracking-wide text-gray-400 dark:text-gray-500">
+                                      Field name
+                                    </label>
+                                    <input
+                                      type="text"
+                                      value={row.key}
+                                      onChange={(e) => {
+                                        const v = e.target.value;
+                                        setAddUsageForm((f) => ({
+                                          ...f,
+                                          contextKvRows: f.contextKvRows.map((r) =>
+                                            r.id === row.id ? { ...r, key: v } : r
+                                          ),
+                                        }));
+                                      }}
+                                      placeholder="e.g. label, referenceId"
+                                      className="mt-1.5 w-full rounded-lg border border-gray-200 bg-white px-3 py-2 text-sm text-gray-900 shadow-sm transition-colors placeholder:text-gray-400 focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-500/20 dark:border-gray-600 dark:bg-gray-900 dark:text-white dark:placeholder:text-gray-500"
+                                    />
+                                  </div>
+                                  <button
+                                    type="button"
+                                    title="Remove field"
+                                    onClick={() =>
+                                      setAddUsageForm((f) => ({
+                                        ...f,
+                                        contextKvRows: f.contextKvRows.filter((r) => r.id !== row.id),
+                                      }))
+                                    }
+                                    className="mb-0.5 flex h-9 w-9 shrink-0 items-center justify-center rounded-lg text-gray-400 transition-colors hover:bg-red-50 hover:text-red-600 dark:hover:bg-red-950/40 dark:hover:text-red-400"
+                                  >
+                                    <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                                      <path
+                                        strokeLinecap="round"
+                                        strokeLinejoin="round"
+                                        strokeWidth={2}
+                                        d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16"
+                                      />
+                                    </svg>
+                                  </button>
+                                </div>
+                                <div className="space-y-1.5 px-4 py-3">
+                                  <label className="block text-[11px] font-semibold uppercase tracking-wide text-gray-400 dark:text-gray-500">
+                                    Value
+                                  </label>
+                                  <input
+                                    type="text"
+                                    value={row.value}
+                                    onChange={(e) => {
+                                      const v = e.target.value;
+                                      setAddUsageForm((f) => ({
+                                        ...f,
+                                        contextKvRows: f.contextKvRows.map((r) =>
+                                          r.id === row.id ? { ...r, value: v } : r
+                                        ),
+                                      }));
+                                    }}
+                                    placeholder="Text, number, true / false / null, or JSON"
+                                    className="w-full rounded-lg border border-gray-200 bg-white px-3 py-2.5 text-sm text-gray-900 shadow-sm transition-colors placeholder:text-gray-400 focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-500/20 dark:border-gray-600 dark:bg-gray-900 dark:text-white dark:placeholder:text-gray-500"
+                                  />
+                                </div>
+                              </>
+                            )}
+                          </div>
+                        ))
+                      )}
+                      {addUsageForm.contextKvRows.length > 0 ? (
+                        <button
+                          type="button"
+                          onClick={() =>
+                            setAddUsageForm((f) => ({
+                              ...f,
+                              contextKvRows: [...f.contextKvRows, newUsageContextKvRow()],
+                            }))
+                          }
+                          className="inline-flex w-full items-center justify-center gap-2 rounded-xl border border-dashed border-gray-300 py-3 text-sm font-medium text-gray-600 transition-colors hover:border-blue-300 hover:bg-blue-50/50 hover:text-blue-700 dark:border-gray-600 dark:text-gray-300 dark:hover:border-blue-500/40 dark:hover:bg-blue-950/20 dark:hover:text-blue-300 sm:w-auto sm:px-5"
+                        >
+                          <svg className="h-4 w-4" fill="none" stroke="currentColor" viewBox="0 0 24 24" aria-hidden>
+                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" />
+                          </svg>
+                          Add another field
+                        </button>
+                      ) : null}
+                      <details className="group rounded-xl border border-gray-200/90 bg-white/60 dark:border-gray-600 dark:bg-gray-900/40">
+                        <summary className="cursor-pointer list-none px-4 py-2.5 text-xs font-medium text-gray-600 marker:hidden dark:text-gray-400 [&::-webkit-details-marker]:hidden">
+                          <span className="inline-flex items-center gap-1.5">
+                            Value formatting hints
+                            <svg
+                              className="h-3.5 w-3.5 text-gray-400 transition-transform group-open:rotate-180"
+                              fill="none"
+                              stroke="currentColor"
+                              viewBox="0 0 24 24"
+                            >
+                              <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M19 9l-7 7-7-7" />
+                            </svg>
+                          </span>
+                        </summary>
+                        <p className="border-t border-gray-100 px-4 pb-3 pt-0 text-xs leading-relaxed text-gray-500 dark:border-gray-700 dark:text-gray-400">
+                          Non-<span className="font-medium text-gray-600 dark:text-gray-300">notes</span> values accept plain text,
+                          booleans (<code className="rounded bg-gray-100 px-0.5 dark:bg-gray-800">true</code> /{' '}
+                          <code className="rounded bg-gray-100 px-0.5 dark:bg-gray-800">false</code> /{' '}
+                          <code className="rounded bg-gray-100 px-0.5 dark:bg-gray-800">null</code>), numbers, or JSON objects/arrays.
+                          The <span className="font-medium text-gray-600 dark:text-gray-300">notes</span> field is always sent as text.
+                        </p>
+                      </details>
+                    </div>
+                  ) : (
+                    <div className="mt-5">
+                      <label className="mb-1.5 block text-xs font-medium uppercase tracking-wide text-gray-400 dark:text-gray-500">
+                        Raw JSON object
+                      </label>
+                      <textarea
+                        value={addUsageForm.contextJson}
+                        onChange={(e) => setAddUsageForm((f) => ({ ...f, contextJson: e.target.value }))}
+                        rows={8}
+                        spellCheck={false}
+                        className="w-full rounded-xl border border-gray-200 bg-gray-950/[0.03] px-4 py-3 font-mono text-sm leading-relaxed text-gray-900 shadow-inner transition-colors focus:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-500/20 dark:border-gray-600 dark:bg-black/20 dark:text-gray-100"
+                        placeholder={'{\n  "label": "…",\n  "description": "…"\n}'}
+                      />
+                    </div>
+                  )}
+                </div>
+                <div className="flex flex-col-reverse gap-3 border-t border-gray-100 pt-6 dark:border-gray-800 sm:flex-row sm:justify-end">
+                  <button
+                    type="button"
+                    disabled={addUsageSubmitting}
+                    onClick={() => setShowAddUsageModal(false)}
+                    className="rounded-xl border border-gray-300 bg-white px-5 py-2.5 text-sm font-medium text-gray-700 shadow-sm transition-colors hover:bg-gray-50 disabled:opacity-50 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-200 dark:hover:bg-gray-700"
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    type="submit"
+                    disabled={addUsageSubmitting}
+                    className="rounded-xl bg-blue-600 px-5 py-2.5 text-sm font-semibold text-white shadow-md shadow-blue-600/25 transition-colors hover:bg-blue-700 disabled:opacity-50 dark:bg-blue-500 dark:shadow-blue-500/20 dark:hover:bg-blue-600"
+                  >
+                    {addUsageSubmitting ? 'Adding…' : 'Add usage'}
+                  </button>
+                </div>
+              </form>
             </div>
           </div>
         )}
@@ -809,7 +1524,7 @@ export default function CustomerDetailPage() {
                               <div className="flex-1 space-y-2">
                                 <div className="flex items-center gap-2">
                                   <span className="text-sm font-medium text-gray-900 dark:text-white">
-                                    {request.type.replace(/_/g, ' ').replace(/\b\w/g, l => l.toUpperCase())}
+                                    {formatTypeLabel(request.type)}
                                   </span>
                                   <span className={`rounded-full px-2 py-0.5 text-xs font-medium ${
                                     request.status === 'COMPLETED'
@@ -818,22 +1533,16 @@ export default function CustomerDetailPage() {
                                       ? 'bg-yellow-100 text-yellow-800 dark:bg-yellow-900/30 dark:text-yellow-200'
                                       : 'bg-gray-100 text-gray-800 dark:bg-gray-700 dark:text-gray-200'
                                   }`}>
-                                    {request.status}
+                                    {formatStatusLabel(request.status)}
                                   </span>
                                 </div>
                                 
                                 {/* Created Date */}
-                                {request.context?.created && (
+                                {(request.created ?? request.context?.created) && (
                                   <div className="flex items-center gap-2">
                                     <span className="text-xs font-medium text-gray-500 dark:text-gray-400">Created:</span>
                                     <span className="text-xs text-gray-700 dark:text-gray-300">
-                                      {new Date(request.context.created).toLocaleDateString('en-US', {
-                                        year: 'numeric',
-                                        month: 'short',
-                                        day: 'numeric',
-                                        hour: '2-digit',
-                                        minute: '2-digit',
-                                      })}
+                                      {formatDate(request.created ?? request.context?.created, { includeTime: true })}
                                     </span>
                                   </div>
                                 )}
@@ -845,7 +1554,7 @@ export default function CustomerDetailPage() {
                                     <span className="text-xs font-semibold text-gray-900 dark:text-white">
                                       {typeof request.pricingInfo.currency === 'string' 
                                         ? request.pricingInfo.currency 
-                                        : request.pricingInfo.currency.code} {request.pricingInfo.price}
+                                        : request.pricingInfo.currency.code} {formatAmount(request.pricingInfo.price)}
                                     </span>
                                   </div>
                                 )}

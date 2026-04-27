@@ -12,13 +12,17 @@ export function Tabs({ tabs, activeTab, onTabChange }: TabsProps) {
   return (
     <div className="w-full">
       <div className="border-b border-gray-200 dark:border-gray-700">
-        <nav className="-mb-px flex space-x-8" aria-label="Tabs">
+        <nav
+          className="-mb-px flex flex-wrap gap-x-6 gap-y-1"
+          aria-label="Tabs"
+        >
           {tabs.map((tab) => (
             <button
               key={tab.id}
+              type="button"
               onClick={() => onTabChange(tab.id)}
               className={`
-                whitespace-nowrap border-b-2 px-1 py-4 text-sm font-medium transition-colors
+                whitespace-nowrap border-b-2 px-1 py-3 text-sm font-medium transition-colors sm:py-4
                 ${
                   activeTab === tab.id
                     ? 'border-blue-500 text-blue-600 dark:border-blue-400 dark:text-blue-400'

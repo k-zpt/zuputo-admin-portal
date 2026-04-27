@@ -2,6 +2,8 @@
 
 import { AdminLayout } from "@/components/AdminLayout";
 import { serviceRequestService } from "@/lib/api/services";
+import { formatTypeLabel, formatStatusLabel } from "@/lib/serviceRequestLabels";
+import { formatAmount, formatDate } from "@/lib/format";
 import { useState, useEffect } from "react";
 import { useParams, useRouter } from "next/navigation";
 import type { ServiceRequest, ApiResponse } from "@/lib/api/types";
@@ -29,21 +31,6 @@ export default function ServiceRequestDetailPage() {
       setError(err instanceof Error ? err.message : 'Failed to load service request details');
     } finally {
       setLoading(false);
-    }
-  };
-
-  const formatDate = (dateString?: string): string => {
-    if (!dateString) return 'N/A';
-    try {
-      return new Date(dateString).toLocaleDateString('en-US', {
-        year: 'numeric',
-        month: 'long',
-        day: 'numeric',
-        hour: '2-digit',
-        minute: '2-digit',
-      });
-    } catch {
-      return dateString;
     }
   };
 
@@ -117,7 +104,7 @@ export default function ServiceRequestDetailPage() {
                 <label className="text-sm font-medium text-gray-500 dark:text-gray-400">Type</label>
                 <p className="mt-1 text-sm text-gray-900 dark:text-white">
                   <span className="inline-flex items-center rounded-full bg-blue-100 px-2.5 py-0.5 text-xs font-medium text-blue-800 dark:bg-blue-900/30 dark:text-blue-200">
-                    {serviceRequest.type}
+                    {formatTypeLabel(serviceRequest.type)}
                   </span>
                 </p>
               </div>
@@ -125,7 +112,7 @@ export default function ServiceRequestDetailPage() {
                 <label className="text-sm font-medium text-gray-500 dark:text-gray-400">Status</label>
                 <p className="mt-1 text-sm text-gray-900 dark:text-white">
                   <span className="inline-flex items-center rounded-full bg-green-100 px-2.5 py-0.5 text-xs font-medium text-green-800 dark:bg-green-900/30 dark:text-green-200">
-                    {serviceRequest.status}
+                    {formatStatusLabel(serviceRequest.status)}
                   </span>
                 </p>
               </div>
@@ -136,7 +123,7 @@ export default function ServiceRequestDetailPage() {
                     ? (typeof serviceRequest.pricingInfo.currency === 'object' 
                         ? serviceRequest.pricingInfo.currency.code 
                         : serviceRequest.pricingInfo.currency)
-                    : 'N/A'} {serviceRequest.pricingInfo?.price || 'N/A'}
+                    : 'N/A'} {serviceRequest.pricingInfo?.price != null ? formatAmount(serviceRequest.pricingInfo.price) : 'N/A'}
                 </p>
               </div>
             </div>
@@ -173,19 +160,19 @@ export default function ServiceRequestDetailPage() {
                     </p>
                   </div>
                 )}
-                {serviceRequest.context.created && (
+                {(serviceRequest.context?.created ?? serviceRequest.created) && (
                   <div>
                     <label className="text-sm font-medium text-gray-500 dark:text-gray-400">Created</label>
                     <p className="mt-1 text-sm text-gray-900 dark:text-white">
-                      {formatDate(serviceRequest.context.created)}
+                      {formatDate(serviceRequest.context?.created ?? serviceRequest.created)}
                     </p>
                   </div>
                 )}
-                {serviceRequest.context.modified && (
+                {(serviceRequest.context?.modified ?? serviceRequest.modified) && (
                   <div>
                     <label className="text-sm font-medium text-gray-500 dark:text-gray-400">Modified</label>
                     <p className="mt-1 text-sm text-gray-900 dark:text-white">
-                      {formatDate(serviceRequest.context.modified)}
+                      {formatDate(serviceRequest.context?.modified ?? serviceRequest.modified)}
                     </p>
                   </div>
                 )}
@@ -367,19 +354,19 @@ export default function ServiceRequestDetailPage() {
                     {serviceRequest.invoice.name}
                   </p>
                 </div>
-                {serviceRequest.invoice.created && (
+                {(serviceRequest.invoice.created ?? serviceRequest.created) && (
                   <div>
                     <label className="text-sm font-medium text-gray-500 dark:text-gray-400">Created</label>
                     <p className="mt-1 text-sm text-gray-900 dark:text-white">
-                      {formatDate(serviceRequest.invoice.created)}
+                      {formatDate(serviceRequest.invoice.created ?? serviceRequest.created)}
                     </p>
                   </div>
                 )}
-                {serviceRequest.invoice.modified && (
+                {(serviceRequest.invoice.modified ?? serviceRequest.modified) && (
                   <div>
                     <label className="text-sm font-medium text-gray-500 dark:text-gray-400">Modified</label>
                     <p className="mt-1 text-sm text-gray-900 dark:text-white">
-                      {formatDate(serviceRequest.invoice.modified)}
+                      {formatDate(serviceRequest.invoice.modified ?? serviceRequest.modified)}
                     </p>
                   </div>
                 )}
@@ -420,7 +407,7 @@ export default function ServiceRequestDetailPage() {
                               ? (typeof serviceRequest.invoice.pricing.currency === 'object' 
                                   ? serviceRequest.invoice.pricing.currency.code 
                                   : serviceRequest.invoice.pricing.currency)
-                              : 'N/A'} {serviceRequest.invoice.pricing?.subTotal || 'N/A'}
+                              : 'N/A'} {serviceRequest.invoice.pricing?.subTotal != null ? formatAmount(serviceRequest.invoice.pricing.subTotal) : 'N/A'}
                           </span>
                         </div>
                         {serviceRequest.invoice.pricing?.tax && (
@@ -431,7 +418,7 @@ export default function ServiceRequestDetailPage() {
                                 ? (typeof serviceRequest.invoice.pricing.currency === 'object' 
                                     ? serviceRequest.invoice.pricing.currency.code 
                                     : serviceRequest.invoice.pricing.currency)
-                                : 'N/A'} {serviceRequest.invoice.pricing.tax}
+                                : 'N/A'} {serviceRequest.invoice.pricing.tax != null ? formatAmount(serviceRequest.invoice.pricing.tax) : 'N/A'}
                             </span>
                           </div>
                         )}
@@ -442,7 +429,7 @@ export default function ServiceRequestDetailPage() {
                               ? (typeof serviceRequest.invoice.pricing.currency === 'object' 
                                   ? serviceRequest.invoice.pricing.currency.code 
                                   : serviceRequest.invoice.pricing.currency)
-                              : 'N/A'} {serviceRequest.invoice.pricing?.total || 'N/A'}
+                              : 'N/A'} {serviceRequest.invoice.pricing?.total != null ? formatAmount(serviceRequest.invoice.pricing.total) : 'N/A'}
                           </span>
                         </div>
                       </div>
@@ -472,14 +459,14 @@ export default function ServiceRequestDetailPage() {
                                   ? (typeof item.pricing.currency === 'object' 
                                       ? item.pricing.currency.code 
                                       : item.pricing.currency)
-                                  : 'N/A'} {item.pricing?.price || 'N/A'}
+                                      : 'N/A'} {item.pricing?.price != null ? formatAmount(item.pricing.price) : 'N/A'}
                               </td>
                               <td className="px-4 py-2 text-sm font-medium text-gray-900 dark:text-white">
                                 {item.pricing?.currency 
                                   ? (typeof item.pricing.currency === 'object' 
                                       ? item.pricing.currency.code 
                                       : item.pricing.currency)
-                                  : 'N/A'} {item.total || 'N/A'}
+                                      : 'N/A'} {item.total != null ? formatAmount(item.total) : 'N/A'}
                               </td>
                             </tr>
                           ))}

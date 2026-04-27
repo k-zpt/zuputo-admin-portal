@@ -2,9 +2,11 @@
 
 import { AdminLayout } from "@/components/AdminLayout";
 import { formService } from "@/lib/api/services";
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import { useRouter } from "next/navigation";
 import type { Form, ApiResponse } from "@/lib/api/types";
+
+const FORMS_LIST_TIMEOUT_MS = 60_000;
 
 export default function FormsPage() {
   const router = useRouter();
@@ -12,28 +14,55 @@ export default function FormsPage() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [searchQuery, setSearchQuery] = useState('');
+  const [debouncedSearch, setDebouncedSearch] = useState('');
   const [featuredOnly, setFeaturedOnly] = useState(false);
+  const listRequestIdRef = useRef(0);
 
   useEffect(() => {
-    loadForms();
-  }, [searchQuery, featuredOnly]);
+    const id = window.setTimeout(() => setDebouncedSearch(searchQuery), 300);
+    return () => window.clearTimeout(id);
+  }, [searchQuery]);
 
-  const loadForms = async () => {
-    try {
-      setLoading(true);
-      setError(null);
-      const response: ApiResponse<Form[]> = await formService.list({
-        q: searchQuery || undefined,
-        featured: featuredOnly || undefined,
-        limit: 100,
-      });
-      setForms(response.data);
-    } catch (err) {
-      setError(err instanceof Error ? err.message : 'Failed to load forms');
-    } finally {
-      setLoading(false);
-    }
-  };
+  useEffect(() => {
+    const requestId = ++listRequestIdRef.current;
+
+    const loadForms = async () => {
+      try {
+        setLoading(true);
+        setError(null);
+        const response: ApiResponse<Form[]> = await Promise.race([
+          formService.list({
+            q: debouncedSearch || undefined,
+            featured: featuredOnly || undefined,
+            limit: 100,
+          }),
+          new Promise<ApiResponse<Form[]>>((_, reject) =>
+            window.setTimeout(
+              () => reject(new Error('FORMS_LIST_TIMEOUT')),
+              FORMS_LIST_TIMEOUT_MS
+            )
+          ),
+        ]);
+        if (requestId !== listRequestIdRef.current) return;
+        const data = response?.data;
+        setForms(Array.isArray(data) ? data : []);
+      } catch (err) {
+        if (requestId !== listRequestIdRef.current) return;
+        if (err instanceof Error && err.message === 'FORMS_LIST_TIMEOUT') {
+          setError(
+            'Request timed out. Check that the backend is running and NEXT_PUBLIC_API_BASE_URL is correct.'
+          );
+        } else {
+          setError(err instanceof Error ? err.message : 'Failed to load forms');
+        }
+        setForms([]);
+      } finally {
+        if (requestId === listRequestIdRef.current) setLoading(false);
+      }
+    };
+
+    loadForms();
+  }, [debouncedSearch, featuredOnly]);
 
   return (
     <AdminLayout>

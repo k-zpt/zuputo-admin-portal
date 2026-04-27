@@ -24,6 +24,7 @@ const menuItems: MenuItem[] = [
     icon: '🎛️',
     children: [
       { name: 'Config', href: '/config', icon: '⚙️' },
+      { name: 'Background Jobs', href: '/system/jobs', icon: '⏱️' },
       { name: 'Message Templates', href: '/message-templates', icon: '📧' },
     ],
   },
@@ -38,7 +39,11 @@ export function Sidebar() {
   const pathname = usePathname();
   const [expandedItems, setExpandedItems] = useState<string[]>(() => {
     // Auto-expand System if we're on a system page
-    if (pathname === '/config' || pathname === '/message-templates') {
+    if (
+      pathname === '/config' ||
+      pathname === '/message-templates' ||
+      pathname.startsWith('/system/')
+    ) {
       return ['System'];
     }
     return [];

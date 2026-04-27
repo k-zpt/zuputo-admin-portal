@@ -66,9 +66,18 @@ export const { handlers, signIn, signOut, auth } = NextAuth({
       return true;
     },
     async authorized({ auth, request: { nextUrl } }) {
+      const pathname = nextUrl.pathname;
+
+      // Never gate Next.js internals — if middleware runs on these (matcher quirks,
+      // Turbopack paths, etc.), a redirect here returns HTML instead of CSS/JS and
+      // the whole app renders unstyled.
+      if (pathname.startsWith("/_next") || pathname.startsWith("/__nextjs")) {
+        return true;
+      }
+
       const isLoggedIn = !!auth?.user;
-      const isOnLoginPage = nextUrl.pathname.startsWith("/login");
-      const isOnApiAuth = nextUrl.pathname.startsWith("/api/auth");
+      const isOnLoginPage = pathname.startsWith("/login");
+      const isOnApiAuth = pathname.startsWith("/api/auth");
       
       // Allow API auth routes
       if (isOnApiAuth) {

@@ -21,6 +21,13 @@ import type {
   UpdateSubscriptionPlanPayload,
   SubscriptionUsage,
   UpdateSubscriptionUsagePayload,
+  AddSubscriptionUsagePayload,
+  BackgroundJob,
+  BackgroundJobConfig,
+  SystemJobRecord,
+  CreateBackgroundJobPayload,
+  UpdateJobSpawnTimePayload,
+  UpdateRenewalOffsetsPayload,
   ApiResponse,
 } from './types';
 
@@ -74,7 +81,11 @@ export const customerService = {
   getProfile: async (id: string) => {
     return apiClient.get<import('./types').CustomerProfile>(API_ENDPOINTS.customerProfile(id));
   },
-  
+
+  listCustomerEntities: async (customerId: string) => {
+    return apiClient.get<unknown>(API_ENDPOINTS.customerEntities(customerId));
+  },
+
   notify: async (customerId: string, data: NotifyCustomerPayload) => {
     return apiClient.post<{ success: boolean }>(API_ENDPOINTS.notifyCustomer(customerId), data);
   },
@@ -86,12 +97,19 @@ export const customerService = {
   updateSubscriptionUsage: async (customerId: string, data: UpdateSubscriptionUsagePayload) => {
     return apiClient.patch<{}>(API_ENDPOINTS.customerSubscriptionUsage(customerId), data);
   },
+
+  addSubscriptionUsage: async (customerId: string, data: AddSubscriptionUsagePayload) => {
+    return apiClient.post<unknown>(API_ENDPOINTS.customerSubscriptionUsage(customerId), data);
+  },
 };
 
 // Form services
 export const formService = {
-  list: async (params?: { page?: number; limit?: number; q?: string; featured?: boolean }) => {
-    return apiClient.get<Form[]>(API_ENDPOINTS.forms, params);
+  list: async (
+    params?: { page?: number; limit?: number; q?: string; featured?: boolean },
+    init?: RequestInit
+  ) => {
+    return apiClient.get<Form[]>(API_ENDPOINTS.forms, params, init);
   },
   
   getById: async (id: string) => {
@@ -268,9 +286,13 @@ export const serviceRequestService = {
   list: async (params?: { cursor?: string; limit?: number; type?: string; status?: string; customerId?: string }) => {
     return apiClient.get<import('./types').ServiceRequest[]>(API_ENDPOINTS.serviceRequests, params);
   },
-  
+
   getById: async (id: string) => {
     return apiClient.get<import('./types').ServiceRequest>(API_ENDPOINTS.serviceRequestById(id));
+  },
+
+  update: async (id: string, data: import('./types').UpdateServiceRequestPayload) => {
+    return apiClient.patch<import('./types').ServiceRequest>(API_ENDPOINTS.serviceRequestById(id), data);
   },
 };
 
@@ -310,6 +332,45 @@ export const subscriptionPlanService = {
   },
   update: async (id: string, data: UpdateSubscriptionPlanPayload) => {
     return apiClient.patch<SubscriptionPlan>(API_ENDPOINTS.subscriptionPlanById(id), data);
+  },
+};
+
+// System / background jobs
+export const systemJobService = {
+  getConfig: async () => {
+    return apiClient.get<BackgroundJobConfig>(API_ENDPOINTS.systemJobsConfig);
+  },
+
+  list: async (params?: { page?: number; limit?: number }) => {
+    return apiClient.get<SystemJobRecord[]>(API_ENDPOINTS.systemJobs, params);
+  },
+
+  triggerSpawn: async () => {
+    return apiClient.post<unknown>(API_ENDPOINTS.systemJobsTriggerSpawn);
+  },
+
+  updateRenewalOffsets: async (data: UpdateRenewalOffsetsPayload) => {
+    return apiClient.patch<unknown>(API_ENDPOINTS.systemJobConfigRenewalOffsets, data);
+  },
+
+  enable: async () => {
+    return apiClient.patch<unknown>(API_ENDPOINTS.systemJobsEnable);
+  },
+
+  disable: async () => {
+    return apiClient.patch<unknown>(API_ENDPOINTS.systemJobsDisable);
+  },
+
+  updateSpawnTime: async (data: UpdateJobSpawnTimePayload) => {
+    return apiClient.patch<unknown>(API_ENDPOINTS.systemJobsSpawnTime, data);
+  },
+
+  triggerJob: async (jobName: string) => {
+    return apiClient.post<unknown>(API_ENDPOINTS.systemJobTrigger(jobName));
+  },
+
+  create: async (data: CreateBackgroundJobPayload) => {
+    return apiClient.post<BackgroundJob>(API_ENDPOINTS.systemJobs, data);
   },
 };
 

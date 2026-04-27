@@ -17,6 +17,7 @@ export const API_ENDPOINTS = {
   customers: '/api/v2/customers',
   customerById: (id: string) => `/api/v2/customers/${id}`,
   customerProfile: (id: string) => `/api/v1/customers/${id}/profile`,
+  customerEntities: (customerId: string) => `/api/v1/customers/${customerId}/entities`,
   notifyCustomer: (id: string) => `/api/v2/customers/${id}/notify`,
   customerSubscriptionUsage: (id: string) => `/api/v2/customers/${id}/subscription/usage`,
   
@@ -65,5 +66,15 @@ export const API_ENDPOINTS = {
   // Subscription Plans
   subscriptionPlans: '/api/v2/subscription-plans',
   subscriptionPlanById: (id: string) => `/api/v2/subscription-plans/${id}`,
+
+  // System / background jobs
+  systemJobsConfig: '/api/v2/system/jobs/config',
+  systemJobs: '/api/v2/system/jobs',
+  systemJobTrigger: (jobName: string) => `/api/v2/system/jobs/${jobName}/trigger`,
+  systemJobsTriggerSpawn: '/api/v2/system/jobs/trigger-spawn',
+  systemJobsEnable: '/api/v2/system/jobs/enable',
+  systemJobsDisable: '/api/v2/system/jobs/disable',
+  systemJobsSpawnTime: '/api/v2/system/jobs/spawn-time',
+  systemJobConfigRenewalOffsets: '/api/v2/system/job-config/renewal-offsets',
 } as const;
 

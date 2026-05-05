@@ -7,6 +7,7 @@ import type {
   UpdateCountryPayload,
   Customer,
   NotifyCustomerPayload,
+  UpdateCustomerProfilePayload,
   Form,
   Config,
   UpdateConfigPayload,
@@ -80,6 +81,10 @@ export const customerService = {
   
   getProfile: async (id: string) => {
     return apiClient.get<import('./types').CustomerProfile>(API_ENDPOINTS.customerProfile(id));
+  },
+
+  updateProfile: async (id: string, data: UpdateCustomerProfilePayload) => {
+    return apiClient.patch<import('./types').CustomerProfile>(API_ENDPOINTS.customerProfile(id), data);
   },
 
   listCustomerEntities: async (customerId: string) => {

@@ -119,6 +119,7 @@ export default function SubscriptionPlansClient() {
   const [benefitLimitInput, setBenefitLimitInput] = useState('');
   const [benefitDiscountInput, setBenefitDiscountInput] = useState('');
   const [editingBenefitIndex, setEditingBenefitIndex] = useState<number | null>(null);
+  const [editingFeatureIndex, setEditingFeatureIndex] = useState<number | null>(null);
 
   const selectedCountry = useMemo(
     () => countries.find((c) => c.id === formData.country),
@@ -285,6 +286,7 @@ export default function SubscriptionPlansClient() {
     setBenefitLimitInput('');
     setBenefitDiscountInput('');
     setEditingBenefitIndex(null);
+    setEditingFeatureIndex(null);
   };
 
   const handleUpdate = async (e: React.FormEvent) => {
@@ -405,6 +407,7 @@ export default function SubscriptionPlansClient() {
     setBenefitLimitInput('');
     setBenefitDiscountInput('');
     setEditingBenefitIndex(null);
+    setEditingFeatureIndex(null);
   };
 
   const handleCancel = () => {
@@ -416,13 +419,33 @@ export default function SubscriptionPlansClient() {
   };
 
   const addFeature = () => {
-    if (newFeature.trim()) {
+    const trimmed = newFeature.trim();
+    if (!trimmed) return;
+    if (editingFeatureIndex !== null) {
+      const updated = [...(formData.features || [])];
+      updated[editingFeatureIndex] = trimmed;
+      setFormData({ ...formData, features: updated });
+      setEditingFeatureIndex(null);
+    } else {
       setFormData({
         ...formData,
-        features: [...(formData.features || []), newFeature.trim()],
+        features: [...(formData.features || []), trimmed],
       });
-      setNewFeature('');
     }
+    setNewFeature('');
+  };
+
+  const startEditingFeature = (index: number) => {
+    const feature = formData.features?.[index];
+    if (feature !== undefined) {
+      setNewFeature(feature);
+      setEditingFeatureIndex(index);
+    }
+  };
+
+  const cancelEditingFeature = () => {
+    setEditingFeatureIndex(null);
+    setNewFeature('');
   };
 
   const removeFeature = (index: number) => {
@@ -430,6 +453,11 @@ export default function SubscriptionPlansClient() {
       ...formData,
       features: formData.features?.filter((_, i) => i !== index) || [],
     });
+    if (editingFeatureIndex === index) {
+      cancelEditingFeature();
+    } else if (editingFeatureIndex !== null && editingFeatureIndex > index) {
+      setEditingFeatureIndex(editingFeatureIndex - 1);
+    }
   };
 
   const addBenefit = () => {
@@ -792,18 +820,29 @@ export default function SubscriptionPlansClient() {
                     {formData.features.map((feature, index) => (
                       <div key={index} className="flex items-center gap-2 rounded-lg border border-gray-200 bg-white p-2 dark:border-gray-700 dark:bg-gray-800">
                         <span className="flex-1 text-sm text-gray-900 dark:text-white">{feature}</span>
-                        <button
-                          type="button"
-                          onClick={() => removeFeature(index)}
-                          className="text-red-600 hover:text-red-700 dark:text-red-400 dark:hover:text-red-300"
-                        >
-                          ✕
-                        </button>
+                        <div className="flex gap-2">
+                          <button
+                            type="button"
+                            onClick={() => startEditingFeature(index)}
+                            className="text-blue-600 hover:text-blue-700 dark:text-blue-400 dark:hover:text-blue-300"
+                            title="Edit feature"
+                          >
+                            ✏️
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => removeFeature(index)}
+                            className="text-red-600 hover:text-red-700 dark:text-red-400 dark:hover:text-red-300"
+                            title="Remove feature"
+                          >
+                            ✕
+                          </button>
+                        </div>
                       </div>
                     ))}
                   </div>
                 )}
-                <div className="flex gap-2">
+                <div className="flex flex-wrap gap-2">
                   <input
                     type="text"
                     value={newFeature}
@@ -814,15 +853,28 @@ export default function SubscriptionPlansClient() {
                         addFeature();
                       }
                     }}
-                    placeholder="Enter a feature and press Enter"
-                    className="flex-1 rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm text-gray-900 shadow-sm focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500 dark:border-gray-600 dark:bg-gray-800 dark:text-white dark:shadow-none dark:focus:border-blue-400 dark:focus:ring-blue-400"
+                    placeholder={
+                      editingFeatureIndex !== null
+                        ? 'Edit feature text and save'
+                        : 'Enter a feature and press Enter'
+                    }
+                    className="min-w-[12rem] flex-1 rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm text-gray-900 shadow-sm focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500 dark:border-gray-600 dark:bg-gray-800 dark:text-white dark:shadow-none dark:focus:border-blue-400 dark:focus:ring-blue-400"
                   />
+                  {editingFeatureIndex !== null && (
+                    <button
+                      type="button"
+                      onClick={cancelEditingFeature}
+                      className="rounded-lg border border-gray-300 bg-white px-4 py-2 text-sm text-gray-700 hover:bg-gray-50 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-300 dark:hover:bg-gray-700"
+                    >
+                      Cancel
+                    </button>
+                  )}
                   <button
                     type="button"
                     onClick={addFeature}
                     className="rounded-lg bg-blue-600 px-4 py-2 text-sm text-white hover:bg-blue-700 dark:bg-blue-500 dark:hover:bg-blue-600"
                   >
-                    Add
+                    {editingFeatureIndex !== null ? 'Update Feature' : 'Add'}
                   </button>
                 </div>
               </div>

@@ -4,10 +4,10 @@ import { AdminLayout } from "@/components/AdminLayout";
 import { countryService, customerService, serviceRequestService, currencyService } from "@/lib/api/services";
 import { formatTypeLabel, formatStatusLabel } from "@/lib/serviceRequestLabels";
 import { formatAmount, formatDate } from "@/lib/format";
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import { useParams, useRouter } from "next/navigation";
 import Link from "next/link";
-import type { Country, CustomerProfile, ServiceRequest, ApiResponse, SubscriptionUsage, AddSubscriptionUsagePayload, Currency } from "@/lib/api/types";
+import type { Country, CustomerProfile, ServiceRequest, ApiResponse, SubscriptionUsage, AddSubscriptionUsagePayload, Currency, UpdateCustomerProfilePayload } from "@/lib/api/types";
 
 const USAGE_ADD_SERVICE_TYPES = [
   { value: 'AD_HOC', label: 'Ad Hoc' },
@@ -176,6 +176,88 @@ function contextObjectToKvRows(obj: Record<string, unknown>): UsageContextKvRow[
   }));
 }
 
+function countryIdFromProfile(country: CustomerProfile['country'] | undefined): string {
+  if (!country) return '';
+  if (typeof country === 'string') return country.trim();
+  return (country.id || '').trim();
+}
+
+/** Normalize profile/API DOB to `YYYY-MM-DD` for `<input type="date">`. */
+function profileDobToHtmlDate(profile: CustomerProfile): string {
+  const raw =
+    profile.dateOfBirth ??
+    (typeof profile.date_of_birth === 'string' ? profile.date_of_birth : undefined);
+  if (raw == null || raw === '') return '';
+  const s = typeof raw === 'string' ? raw.trim() : String(raw);
+  const iso = s.match(/^(\d{4}-\d{2}-\d{2})/);
+  if (iso) return iso[1];
+  const ddmm = formatDate(s, { format: 'dd/mm/yyyy' });
+  if (ddmm === 'N/A') return '';
+  const [dd, mm, yyyy] = ddmm.split('/');
+  if (!yyyy || !mm || !dd) return '';
+  return `${yyyy}-${mm}-${dd}`;
+}
+
+function formatProfileDobDisplay(profile: CustomerProfile): string {
+  const raw =
+    profile.dateOfBirth ??
+    (typeof profile.date_of_birth === 'string' ? profile.date_of_birth : undefined);
+  if (raw == null || raw === '') return 'N/A';
+  const formatted = formatDate(raw, { format: 'dd/mm/yyyy' });
+  return formatted === 'N/A' ? String(raw).trim() || 'N/A' : formatted;
+}
+
+type ProfileEditFormState = {
+  firstName: string;
+  otherNames: string;
+  lastName: string;
+  country: string;
+  dateOfBirth: string;
+  address: string;
+};
+
+function profileToEditForm(profile: CustomerProfile): ProfileEditFormState {
+  return {
+    firstName: profile.firstName ?? '',
+    otherNames: profile.otherNames ?? '',
+    lastName: profile.lastName ?? '',
+    country: countryIdFromProfile(profile.country),
+    dateOfBirth: profileDobToHtmlDate(profile),
+    address: profile.address ?? '',
+  };
+}
+
+function buildCustomerProfilePatch(
+  original: CustomerProfile,
+  form: ProfileEditFormState
+): UpdateCustomerProfilePayload | null {
+  const payload: UpdateCustomerProfilePayload = {};
+  const t = (s: string) => s.trim();
+
+  if (t(form.firstName) !== t(original.firstName ?? '')) {
+    payload.firstName = t(form.firstName);
+  }
+  if (t(form.otherNames) !== t(original.otherNames ?? '')) {
+    payload.otherNames = t(form.otherNames);
+  }
+  if (t(form.lastName) !== t(original.lastName ?? '')) {
+    payload.lastName = t(form.lastName);
+  }
+  if (t(form.country) !== t(countryIdFromProfile(original.country))) {
+    payload.country = t(form.country);
+  }
+  const origDob = profileDobToHtmlDate(original);
+  const nextDob = t(form.dateOfBirth);
+  if (nextDob !== origDob) {
+    payload.dateOfBirth = nextDob === '' ? null : nextDob;
+  }
+  if (t(form.address) !== t(original.address ?? '')) {
+    payload.address = t(form.address);
+  }
+
+  return Object.keys(payload).length > 0 ? payload : null;
+}
+
 export default function CustomerDetailPage() {
   const params = useParams();
   const router = useRouter();
@@ -215,6 +297,27 @@ export default function CustomerDetailPage() {
     contextKvRows: defaultUsageContextRows(),
     contextJson: '',
   });
+
+  const [countriesList, setCountriesList] = useState<Country[]>([]);
+  const [editingProfile, setEditingProfile] = useState(false);
+  const [profileEditForm, setProfileEditForm] = useState<ProfileEditFormState | null>(null);
+  const [savingProfile, setSavingProfile] = useState(false);
+  const dobInputRef = useRef<HTMLInputElement>(null);
+
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      try {
+        const res = await countryService.list({ limit: 500 });
+        if (!cancelled) setCountriesList(Array.isArray(res.data) ? res.data : []);
+      } catch {
+        if (!cancelled) setCountriesList([]);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   useEffect(() => {
     if (!showAddUsageModal) return;
@@ -491,6 +594,50 @@ export default function CustomerDetailPage() {
     setCursor(null);
   };
 
+  const openDobPicker = () => {
+    const el = dobInputRef.current;
+    if (!el) return;
+    try {
+      el.showPicker?.();
+    } catch {
+      el.focus();
+    }
+  };
+
+  const handleStartEditProfile = () => {
+    if (!profile) return;
+    setProfileEditForm(profileToEditForm(profile));
+    setEditingProfile(true);
+    setError(null);
+  };
+
+  const handleCancelEditProfile = () => {
+    setEditingProfile(false);
+    setProfileEditForm(null);
+  };
+
+  const handleSaveProfile = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!profile || !profileEditForm) return;
+    const patch = buildCustomerProfilePatch(profile, profileEditForm);
+    if (!patch) {
+      handleCancelEditProfile();
+      return;
+    }
+    try {
+      setSavingProfile(true);
+      setError(null);
+      await customerService.updateProfile(customerId, patch);
+      const refreshed = await customerService.getProfile(customerId);
+      setProfile(refreshed.data);
+      handleCancelEditProfile();
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Failed to update profile');
+    } finally {
+      setSavingProfile(false);
+    }
+  };
+
   const formatCustomerName = (customer?: CustomerProfile): string => {
     if (!customer) return 'N/A';
     const parts = [customer.firstName, customer.otherNames, customer.lastName].filter(Boolean);
@@ -555,72 +702,250 @@ export default function CustomerDetailPage() {
         {/* Customer Profile Overview */}
         {profile && (
           <div className="rounded-lg border border-gray-200 bg-white dark:border-gray-800 dark:bg-gray-900">
-            <div className="border-b border-gray-200 px-6 py-4 dark:border-gray-700">
+            <div className="flex flex-wrap items-center justify-between gap-3 border-b border-gray-200 px-6 py-4 dark:border-gray-700">
               <h2 className="text-xl font-semibold text-gray-900 dark:text-white">Profile Overview</h2>
+              {!editingProfile ? (
+                <button
+                  type="button"
+                  onClick={handleStartEditProfile}
+                  className="rounded-lg bg-blue-600 px-4 py-2 text-sm font-medium text-white hover:bg-blue-700 dark:bg-blue-500 dark:hover:bg-blue-600"
+                >
+                  Edit profile
+                </button>
+              ) : (
+                <div className="flex flex-wrap gap-2">
+                  <button
+                    type="button"
+                    onClick={handleCancelEditProfile}
+                    disabled={savingProfile}
+                    className="rounded-lg border border-gray-300 bg-white px-4 py-2 text-sm font-medium text-gray-700 hover:bg-gray-50 disabled:opacity-50 dark:border-gray-600 dark:bg-gray-800 dark:text-gray-200 dark:hover:bg-gray-700"
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    type="submit"
+                    form="customer-profile-edit-form"
+                    disabled={savingProfile || !profileEditForm}
+                    className="rounded-lg bg-blue-600 px-4 py-2 text-sm font-medium text-white hover:bg-blue-700 disabled:opacity-50 dark:bg-blue-500 dark:hover:bg-blue-600"
+                  >
+                    {savingProfile ? 'Saving…' : 'Save changes'}
+                  </button>
+                </div>
+              )}
             </div>
             <div className="px-6 py-4">
-              <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
-                <div>
-                  <label className="text-sm font-medium text-gray-500 dark:text-gray-400">Name</label>
-                  <p className="mt-1 text-sm text-gray-900 dark:text-white">
-                    {formatCustomerName(profile)}
-                  </p>
-                </div>
-                <div>
-                  <label className="text-sm font-medium text-gray-500 dark:text-gray-400">Email</label>
-                  <p className="mt-1 text-sm text-gray-900 dark:text-white">
-                    {profile.emailAddress || 'N/A'}
-                  </p>
-                </div>
-                <div>
-                  <label className="text-sm font-medium text-gray-500 dark:text-gray-400">Type</label>
-                  <p className="mt-1 text-sm text-gray-900 dark:text-white">
-                    {profile.type}
-                  </p>
-                </div>
-                <div>
-                  <label className="text-sm font-medium text-gray-500 dark:text-gray-400">Status</label>
-                  <p className="mt-1 text-sm text-gray-900 dark:text-white">
-                    {profile.status}
-                  </p>
-                </div>
-                {profile.country && (
+              {editingProfile && profileEditForm ? (
+                <form id="customer-profile-edit-form" onSubmit={handleSaveProfile} className="space-y-4">
+                  <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
+                    <div>
+                      <label
+                        htmlFor="profile-first-name"
+                        className="block text-sm font-medium text-gray-700 dark:text-gray-300"
+                      >
+                        First name
+                      </label>
+                      <input
+                        id="profile-first-name"
+                        type="text"
+                        value={profileEditForm.firstName}
+                        onChange={(e) =>
+                          setProfileEditForm((prev) =>
+                            prev ? { ...prev, firstName: e.target.value } : prev
+                          )
+                        }
+                        className="mt-1 w-full rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm text-gray-900 shadow-sm focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500 dark:border-gray-600 dark:bg-gray-800 dark:text-white dark:shadow-none dark:focus:border-blue-400 dark:focus:ring-blue-400"
+                      />
+                    </div>
+                    <div>
+                      <label
+                        htmlFor="profile-other-names"
+                        className="block text-sm font-medium text-gray-700 dark:text-gray-300"
+                      >
+                        Other names
+                      </label>
+                      <input
+                        id="profile-other-names"
+                        type="text"
+                        value={profileEditForm.otherNames}
+                        onChange={(e) =>
+                          setProfileEditForm((prev) =>
+                            prev ? { ...prev, otherNames: e.target.value } : prev
+                          )
+                        }
+                        className="mt-1 w-full rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm text-gray-900 shadow-sm focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500 dark:border-gray-600 dark:bg-gray-800 dark:text-white dark:shadow-none dark:focus:border-blue-400 dark:focus:ring-blue-400"
+                      />
+                    </div>
+                    <div>
+                      <label
+                        htmlFor="profile-last-name"
+                        className="block text-sm font-medium text-gray-700 dark:text-gray-300"
+                      >
+                        Last name
+                      </label>
+                      <input
+                        id="profile-last-name"
+                        type="text"
+                        value={profileEditForm.lastName}
+                        onChange={(e) =>
+                          setProfileEditForm((prev) =>
+                            prev ? { ...prev, lastName: e.target.value } : prev
+                          )
+                        }
+                        className="mt-1 w-full rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm text-gray-900 shadow-sm focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500 dark:border-gray-600 dark:bg-gray-800 dark:text-white dark:shadow-none dark:focus:border-blue-400 dark:focus:ring-blue-400"
+                      />
+                    </div>
+                    <div>
+                      <label
+                        htmlFor="profile-country"
+                        className="block text-sm font-medium text-gray-700 dark:text-gray-300"
+                      >
+                        Country
+                      </label>
+                      <select
+                        id="profile-country"
+                        value={profileEditForm.country}
+                        onChange={(e) =>
+                          setProfileEditForm((prev) =>
+                            prev ? { ...prev, country: e.target.value } : prev
+                          )
+                        }
+                        className="mt-1 w-full appearance-none rounded-lg border border-gray-300 bg-white bg-[url('data:image/svg+xml;charset=UTF-8,%3Csvg%20xmlns%3D%22http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%22%20viewBox%3D%220%200%2024%2024%22%20fill%3D%22none%22%20stroke%3D%22%236b7280%22%20stroke-width%3D%222%22%3E%3Cpath%20d%3D%22m6%209%206%206%206-6%22%2F%3E%3C%2Fsvg%3E')] bg-[length:1.5em_1.5em] bg-[right_0.75rem_center] bg-no-repeat px-3 py-2 pr-10 text-sm text-gray-900 shadow-sm focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500 dark:border-gray-600 dark:bg-gray-800 dark:bg-[url('data:image/svg+xml;charset=UTF-8,%3Csvg%20xmlns%3D%22http%3A%2F%2Fwww.w3.org%2F2000%2Fsvg%22%20viewBox%3D%220%200%2024%2024%22%20fill%3D%22none%22%20stroke%3D%22%239ca3af%22%20stroke-width%3D%222%22%3E%3Cpath%20d%3D%22m6%209%206%206%206-6%22%2F%3E%3C%2Fsvg%3E')] dark:text-white dark:shadow-none dark:focus:border-blue-400 dark:focus:ring-blue-400"
+                      >
+                        <option value="">Select country</option>
+                        {countriesList.map((c) => (
+                          <option key={c.id} value={c.id}>
+                            {c.name} ({c.code})
+                          </option>
+                        ))}
+                      </select>
+                    </div>
+                    <div className="md:col-span-2">
+                      <span
+                        id="profile-dob-label"
+                        className="block text-sm font-medium text-gray-700 dark:text-gray-300"
+                      >
+                        Date of birth
+                      </span>
+                      <div
+                        className="mt-1 cursor-pointer rounded-lg border border-gray-300 bg-white shadow-sm transition hover:border-gray-400 dark:border-gray-600 dark:bg-gray-800 dark:hover:border-gray-500"
+                        onClick={openDobPicker}
+                      >
+                        <input
+                          ref={dobInputRef}
+                          type="date"
+                          lang="en-GB"
+                          aria-labelledby="profile-dob-label"
+                          value={profileEditForm.dateOfBirth}
+                          onChange={(e) =>
+                            setProfileEditForm((prev) =>
+                              prev ? { ...prev, dateOfBirth: e.target.value } : prev
+                            )
+                          }
+                          className="min-h-[42px] w-full cursor-pointer rounded-lg border-0 bg-transparent px-3 py-2 text-sm text-gray-900 outline-none focus:ring-2 focus:ring-inset focus:ring-blue-500 dark:text-white dark:focus:ring-blue-400"
+                        />
+                      </div>
+                    </div>
+                    <div className="md:col-span-2">
+                      <label
+                        htmlFor="profile-address"
+                        className="block text-sm font-medium text-gray-700 dark:text-gray-300"
+                      >
+                        Address
+                      </label>
+                      <textarea
+                        id="profile-address"
+                        value={profileEditForm.address}
+                        onChange={(e) =>
+                          setProfileEditForm((prev) =>
+                            prev ? { ...prev, address: e.target.value } : prev
+                          )
+                        }
+                        rows={3}
+                        className="mt-1 w-full rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm text-gray-900 shadow-sm focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500 dark:border-gray-600 dark:bg-gray-800 dark:text-white dark:shadow-none dark:focus:border-blue-400 dark:focus:ring-blue-400"
+                      />
+                    </div>
+                  </div>
+                  <div className="rounded-lg border border-gray-200 bg-gray-50 p-4 text-sm text-gray-600 dark:border-gray-700 dark:bg-gray-800 dark:text-gray-400">
+                    <p className="font-medium text-gray-800 dark:text-gray-200">Read-only</p>
+                    <p className="mt-1">
+                      Email: {profile.emailAddress || 'N/A'} · Type: {profile.type} · Status:{' '}
+                      {profile.status}
+                    </p>
+                  </div>
+                </form>
+              ) : (
+                <div className="grid grid-cols-1 gap-4 md:grid-cols-2">
+                  <div>
+                    <label className="text-sm font-medium text-gray-500 dark:text-gray-400">Name</label>
+                    <p className="mt-1 text-sm text-gray-900 dark:text-white">
+                      {formatCustomerName(profile)}
+                    </p>
+                  </div>
+                  <div>
+                    <label className="text-sm font-medium text-gray-500 dark:text-gray-400">Email</label>
+                    <p className="mt-1 text-sm text-gray-900 dark:text-white">
+                      {profile.emailAddress || 'N/A'}
+                    </p>
+                  </div>
+                  <div>
+                    <label className="text-sm font-medium text-gray-500 dark:text-gray-400">Type</label>
+                    <p className="mt-1 text-sm text-gray-900 dark:text-white">{profile.type}</p>
+                  </div>
+                  <div>
+                    <label className="text-sm font-medium text-gray-500 dark:text-gray-400">Status</label>
+                    <p className="mt-1 text-sm text-gray-900 dark:text-white">{profile.status}</p>
+                  </div>
                   <div>
                     <label className="text-sm font-medium text-gray-500 dark:text-gray-400">Country</label>
                     <p className="mt-1 text-sm text-gray-900 dark:text-white">
-                      {profile.residentCountryName || 
-                       (typeof profile.country === 'object' ? profile.country.name || profile.country.code : profile.country) || 
-                       'N/A'}
+                      {profile.residentCountryName ||
+                        (typeof profile.country === 'object'
+                          ? profile.country?.name || profile.country?.code
+                          : profile.country) ||
+                        'N/A'}
                     </p>
                   </div>
-                )}
-                {profile.address && (
                   <div>
-                    <label className="text-sm font-medium text-gray-500 dark:text-gray-400">Address</label>
+                    <label className="text-sm font-medium text-gray-500 dark:text-gray-400">
+                      Date of birth
+                    </label>
                     <p className="mt-1 text-sm text-gray-900 dark:text-white">
-                      {profile.address}
+                      {formatProfileDobDisplay(profile)}
                     </p>
                   </div>
-                )}
-                <div>
-                  <label className="text-sm font-medium text-gray-500 dark:text-gray-400">Subscription</label>
-                  <p className="mt-1 text-sm text-gray-900 dark:text-white">
-                    {profile.subscription ? (
-                      <Link
-                        href={`/subscription-plans?planId=${profile.subscription.plan?.id || profile.subscription.planId}`}
-                        className="inline-flex items-center gap-2 text-blue-600 hover:text-blue-800 dark:text-blue-400 dark:hover:text-blue-300"
-                      >
-                        <span className="inline-flex h-2 w-2 rounded-full bg-green-500"></span>
-                        <span>{profile.subscription.plan?.label || profile.subscription.plan?.code || `Plan ${profile.subscription.planId}` || 'Active Subscription'}</span>
-                      </Link>
-                    ) : (
-                      <span className="inline-flex items-center rounded-full bg-gray-100 px-2.5 py-0.5 text-xs font-medium text-gray-800 dark:bg-gray-700 dark:text-gray-200">
-                        None
-                      </span>
-                    )}
-                  </p>
+                  <div className="md:col-span-2">
+                    <label className="text-sm font-medium text-gray-500 dark:text-gray-400">Address</label>
+                    <p className="mt-1 whitespace-pre-wrap text-sm text-gray-900 dark:text-white">
+                      {profile.address?.trim() ? profile.address : 'N/A'}
+                    </p>
+                  </div>
+                  <div>
+                    <label className="text-sm font-medium text-gray-500 dark:text-gray-400">
+                      Subscription
+                    </label>
+                    <p className="mt-1 text-sm text-gray-900 dark:text-white">
+                      {profile.subscription ? (
+                        <Link
+                          href={`/subscription-plans?planId=${profile.subscription.plan?.id || profile.subscription.planId}`}
+                          className="inline-flex items-center gap-2 text-blue-600 hover:text-blue-800 dark:text-blue-400 dark:hover:text-blue-300"
+                        >
+                          <span className="inline-flex h-2 w-2 rounded-full bg-green-500"></span>
+                          <span>
+                            {profile.subscription.plan?.label ||
+                              profile.subscription.plan?.code ||
+                              `Plan ${profile.subscription.planId}` ||
+                              'Active Subscription'}
+                          </span>
+                        </Link>
+                      ) : (
+                        <span className="inline-flex items-center rounded-full bg-gray-100 px-2.5 py-0.5 text-xs font-medium text-gray-800 dark:bg-gray-700 dark:text-gray-200">
+                          None
+                        </span>
+                      )}
+                    </p>
+                  </div>
                 </div>
-              </div>
+              )}
             </div>
           </div>
         )}

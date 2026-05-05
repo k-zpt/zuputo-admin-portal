@@ -66,6 +66,17 @@ export interface NotifyCustomerPayload {
   type?: 'SERVICE_REQUEST' | 'INFO' | 'FEEDBACK';
 }
 
+/** PATCH /api/v1/customers/{id}/profile */
+export interface UpdateCustomerProfilePayload {
+  firstName?: string;
+  otherNames?: string;
+  lastName?: string;
+  country?: string;
+  /** ISO date string e.g. "1990-07-15"; null clears when supported by API */
+  dateOfBirth?: string | null;
+  address?: string;
+}
+
 export interface CustomerSubscription {
   id: string;
   planId: string;
@@ -77,6 +88,8 @@ export interface CustomerSubscription {
 
 export interface CustomerProfile extends Omit<Customer, 'country'> {
   country?: string | Country; // Can be string ID or full Country object
+  /** ISO date or API-specific string; snake_case may appear via index signature */
+  dateOfBirth?: string;
   subscription?: CustomerSubscription | null;
   /** Optional; backend may return entity ids or objects for linking usage, etc. */
   entities?: string[] | Array<{ id: string; name?: string; [key: string]: unknown }>;

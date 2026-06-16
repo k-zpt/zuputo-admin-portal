@@ -10,15 +10,23 @@ interface MenuItem {
   href?: string;
   icon: string;
   children?: MenuItem[];
+  /** When true, also active for paths under `href/` (e.g. /forms/[id]). */
+  matchPrefix?: boolean;
 }
 
 const menuItems: MenuItem[] = [
   { name: 'Customers', href: '/customers', icon: '👥' },
   { name: 'Service Requests', href: '/service-requests', icon: '📋' },
-  { name: 'Messages', href: '/messages', icon: '💬' },
-  { name: 'Countries', href: '/countries', icon: '🌍' },
-  { name: 'Currencies', href: '/currencies', icon: '💰' },
-  { name: 'Forms', href: '/forms', icon: '📝' },
+  { name: 'Bookings', href: '/scheduling/bookings', icon: '📅' },
+  {
+    name: 'Catalog',
+    icon: '📚',
+    children: [
+      { name: 'Countries', href: '/countries', icon: '🌍' },
+      { name: 'Currencies', href: '/currencies', icon: '💰' },
+      { name: 'Forms', href: '/forms', icon: '📝', matchPrefix: true },
+    ],
+  },
   {
     name: 'System',
     icon: '🎛️',
@@ -28,26 +36,57 @@ const menuItems: MenuItem[] = [
       { name: 'Message Templates', href: '/message-templates', icon: '📧' },
     ],
   },
-  { name: 'Payment Links', href: '/payment-links', icon: '🔗' },
-  { name: 'Transactions', href: '/transactions', icon: '💳' },
-  { name: 'Discount Programs', href: '/discount-programs', icon: '🎫' },
-  { name: 'Subscription Plans', href: '/subscription-plans', icon: '📦' },
+  {
+    name: 'Commercial',
+    icon: '💼',
+    children: [
+      { name: 'Transactions', href: '/transactions', icon: '💳' },
+      { name: 'Payment Links', href: '/payment-links', icon: '🔗' },
+      { name: 'Subscription Plans', href: '/subscription-plans', icon: '📦' },
+      { name: 'Discount Programs', href: '/discount-programs', icon: '🎫' },
+    ],
+  },
   { name: 'Blog', href: '/blog', icon: '📰' },
 ];
 
 export function Sidebar() {
   const pathname = usePathname();
   const [expandedItems, setExpandedItems] = useState<string[]>(() => {
-    // Auto-expand System if we're on a system page
+    const expanded: string[] = [];
     if (
       pathname === '/config' ||
       pathname === '/message-templates' ||
       pathname.startsWith('/system/')
     ) {
-      return ['System'];
+      expanded.push('System');
     }
-    return [];
+    if (
+      pathname === '/countries' ||
+      pathname === '/currencies' ||
+      pathname === '/forms' ||
+      pathname.startsWith('/forms/')
+    ) {
+      expanded.push('Catalog');
+    }
+    if (
+      pathname === '/transactions' ||
+      pathname === '/payment-links' ||
+      pathname === '/discount-programs' ||
+      pathname === '/subscription-plans' ||
+      pathname.startsWith('/subscription-plans')
+    ) {
+      expanded.push('Commercial');
+    }
+    return expanded;
   });
+
+  const pathMatchesItem = (pathname: string, item: MenuItem): boolean => {
+    if (!item.href) return false;
+    if (item.matchPrefix) {
+      return pathname === item.href || pathname.startsWith(`${item.href}/`);
+    }
+    return pathname === item.href;
+  };
 
   const toggleExpand = (itemName: string) => {
     setExpandedItems((prev) =>
@@ -59,7 +98,7 @@ export function Sidebar() {
 
   const isItemActive = (item: MenuItem): boolean => {
     if (item.href) {
-      return pathname === item.href;
+      return pathMatchesItem(pathname, item);
     }
     if (item.children) {
       return item.children.some((child) => isItemActive(child));

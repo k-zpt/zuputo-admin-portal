@@ -30,6 +30,10 @@ import type {
   UpdateJobSpawnTimePayload,
   UpdateRenewalOffsetsPayload,
   ApiResponse,
+  SchedulingBooking,
+  SchedulingBookingActionResponse,
+  RejectBookingPayload,
+  RescheduleBookingPayload,
 } from './types';
 
 // Currency services
@@ -284,6 +288,19 @@ export const notificationService = {
   create: async (data: import('./types').CreateNotificationPayload) => {
     return apiClient.post<{ success: boolean }>(API_ENDPOINTS.notifications, data);
   },
+
+  listForCustomer: async (customerId: string) => {
+    return apiClient.get<import('./types').AppNotification[]>(
+      API_ENDPOINTS.customerNotifications(customerId)
+    );
+  },
+
+  markRead: async (customerId: string, notificationId: string) => {
+    return apiClient.patch<unknown>(
+      API_ENDPOINTS.customerNotification(customerId, notificationId),
+      { hasBeenRead: true }
+    );
+  },
 };
 
 // Service Request services
@@ -339,6 +356,44 @@ export const subscriptionPlanService = {
     return apiClient.patch<SubscriptionPlan>(API_ENDPOINTS.subscriptionPlanById(id), data);
   },
 };
+
+// Bookings (scheduling)
+export const bookingService = {
+  list: async (params?: { cursor?: string; limit?: number; status?: string }) => {
+    return apiClient.get<SchedulingBooking[]>(API_ENDPOINTS.bookings, params);
+  },
+
+  confirm: async (id: string) => {
+    return apiClient.patch<SchedulingBookingActionResponse>(
+      API_ENDPOINTS.bookingAction(id, 'confirm'),
+      {}
+    );
+  },
+
+  cancel: async (id: string) => {
+    return apiClient.patch<SchedulingBookingActionResponse>(
+      API_ENDPOINTS.bookingAction(id, 'cancel'),
+      {}
+    );
+  },
+
+  reject: async (id: string, data: RejectBookingPayload) => {
+    return apiClient.patch<SchedulingBookingActionResponse>(
+      API_ENDPOINTS.bookingAction(id, 'reject'),
+      data
+    );
+  },
+
+  reschedule: async (id: string, data: RescheduleBookingPayload) => {
+    return apiClient.patch<SchedulingBookingActionResponse>(
+      API_ENDPOINTS.bookingAction(id, 'reschedule'),
+      data
+    );
+  },
+};
+
+/** @deprecated Use bookingService */
+export const schedulingBookingService = bookingService;
 
 // System / background jobs
 export const systemJobService = {

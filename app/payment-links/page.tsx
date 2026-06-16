@@ -4,6 +4,13 @@ import { AdminLayout } from "@/components/AdminLayout";
 import { Tabs } from "@/components/Tabs";
 import { paymentLinkService, countryService, currencyService, customerService, notifierService, messageTemplateService, notificationService, offlineInvoiceService } from "@/lib/api/services";
 import { DEFAULT_PAYMENT_LINK_EMAIL_TEMPLATE, renderEmailTemplate, formatNumber, formatDate } from "@/lib/emailTemplates";
+import {
+  addDaysToDateInputValue,
+  dateInputToUtcMidnightMs,
+  formatDateInputValue,
+  parseDateInputLocal,
+  toDateInputValue,
+} from "@/lib/format";
 import { PAYMENT_LINK_BASE_URL, FINANCE_EMAIL } from "@/lib/api/config";
 import { useState, useEffect, useRef } from "react";
 import type { AdhocRequest, CreateAdhocRequestPayload, ApiResponse, Country, Currency, Customer, MessageTemplate, CreateOfflineInvoicePayload } from "@/lib/api/types";
@@ -374,19 +381,16 @@ export default function PaymentLinksPage() {
     return currencies.filter(c => supportedCurrencyCodes.includes(c.code));
   };
 
+  const getValidUntilMs = (): number => {
+    const dueDateInput =
+      paymentType === 'INVOICE' && invoiceData.dueDate
+        ? invoiceData.dueDate
+        : addDaysToDateInputValue(14);
+    return dateInputToUtcMidnightMs(dueDateInput) ?? dateInputToUtcMidnightMs(addDaysToDateInputValue(14))!;
+  };
+
   const generatePaymentLink = async (): Promise<AdhocRequest> => {
-    // validUntil: use epoch millis at 00:00 (no time component) for API compatibility
-    let validUntil: number | undefined;
-    if (paymentType === 'INVOICE' && invoiceData.dueDate) {
-      const dueDate = new Date(invoiceData.dueDate);
-      dueDate.setHours(0, 0, 0, 0);
-      validUntil = dueDate.getTime();
-    } else {
-      // Default: 2 weeks from now, truncated to midnight
-      const futureDate = new Date(Date.now() + 14 * 24 * 60 * 60 * 1000);
-      futureDate.setHours(0, 0, 0, 0);
-      validUntil = futureDate.getTime();
-    }
+    const validUntil = getValidUntilMs();
 
     let payload: CreateAdhocRequestPayload;
 
@@ -545,7 +549,7 @@ export default function PaymentLinksPage() {
               customer_name: invoiceData.billTo.name,
               customer_email_address: invoiceData.billTo.email,
               customer_address: invoiceData.billTo.address,
-              due_date: invoiceData.dueDate ? new Date(invoiceData.dueDate).toLocaleDateString() : '',
+              due_date: invoiceData.dueDate ? formatDateInputValue(invoiceData.dueDate) : '',
               notes: invoiceData.notes,
               terms: calculateTerms(),
               subtotal: formatNumber(calculateInvoiceSubtotal()),
@@ -613,16 +617,16 @@ export default function PaymentLinksPage() {
         
         if (paymentType === 'INVOICE') {
           // Build offline invoice payload and let backend send the email using the INVOICE_PAYMENT_LINK template content
-          const invoiceDate = new Date();
-          const validUntilDate = invoiceData.dueDate ? new Date(invoiceData.dueDate) : new Date(Date.now() + 14 * 24 * 60 * 60 * 1000);
+          const invoiceDateMs = dateInputToUtcMidnightMs(toDateInputValue())!;
+          const validUntilMs = getValidUntilMs();
           
           const offlinePayload: CreateOfflineInvoicePayload = {
             invoiceInfo: {
-              date: invoiceDate.getTime(),
-              validUntil: validUntilDate.getTime(),
+              date: invoiceDateMs,
+              validUntil: validUntilMs,
               terms: calculateTerms() || undefined,
               items: invoiceData.lineItems.map(item => ({
-                date: item.date ? new Date(item.date).getTime() : invoiceDate.getTime(),
+                date: item.date ? dateInputToUtcMidnightMs(item.date) ?? invoiceDateMs : invoiceDateMs,
                 service: item.service,
                 description: item.description,
                 quantity: parseInt(item.qty) || 0,
@@ -778,7 +782,7 @@ export default function PaymentLinksPage() {
                 customer_name: invoiceData.billTo.name || customerName,
                 customer_email_address: invoiceData.billTo.email || customer.emailAddress,
                 customer_address: invoiceData.billTo.address,
-                due_date: invoiceData.dueDate ? new Date(invoiceData.dueDate).toLocaleDateString() : '',
+                due_date: invoiceData.dueDate ? formatDateInputValue(invoiceData.dueDate) : '',
                 notes: invoiceData.notes,
                 terms: calculateTerms(),
                 subtotal: formatNumber(calculateInvoiceSubtotal()),
@@ -954,10 +958,10 @@ export default function PaymentLinksPage() {
     if (!invoiceData.dueDate) {
       return '';
     }
-    const today = new Date();
-    today.setHours(0, 0, 0, 0);
-    const dueDate = new Date(invoiceData.dueDate);
-    dueDate.setHours(0, 0, 0, 0);
+    const today = parseDateInputLocal(toDateInputValue());
+    if (!today) return '';
+    const dueDate = parseDateInputLocal(invoiceData.dueDate);
+    if (!dueDate) return '';
     
     // Calculate difference in days
     const diffTime = dueDate.getTime() - today.getTime();
@@ -990,14 +994,11 @@ export default function PaymentLinksPage() {
     // Use a mock payment link URL for preview (since we don't have a real one yet)
     const mockPaymentLinkUrl = `${PAYMENT_LINK_BASE_URL}/adhoc-payments/[payment-token-will-be-generated]`;
     // Create a date 2 weeks (14 days) from now and format it like the API would return
-    const futureDate = new Date(Date.now() + 14 * 24 * 60 * 60 * 1000);
-    const day = String(futureDate.getDate()).padStart(2, '0');
-    const month = String(futureDate.getMonth() + 1).padStart(2, '0');
-    const year = futureDate.getFullYear();
-    const hours = String(futureDate.getHours()).padStart(2, '0');
-    const minutes = String(futureDate.getMinutes()).padStart(2, '0');
-    const seconds = String(futureDate.getSeconds()).padStart(2, '0');
-    const mockValidUntil = `${day}/${month}/${year}, ${hours}:${minutes}:${seconds}`;
+    const mockValidUntil = formatDateInputValue(
+      paymentType === 'INVOICE' && invoiceData.dueDate
+        ? invoiceData.dueDate
+        : addDaysToDateInputValue(14)
+    );
     
     // Get data based on payment type
     let label: string;
@@ -1155,7 +1156,7 @@ export default function PaymentLinksPage() {
             customer_name: invoiceData.billTo.name || 'Customer Name',
             customer_email_address: invoiceData.billTo.email || 'customer@example.com',
             customer_address: invoiceData.billTo.address || '',
-            due_date: invoiceData.dueDate ? new Date(invoiceData.dueDate).toLocaleDateString() : '',
+            due_date: invoiceData.dueDate ? formatDateInputValue(invoiceData.dueDate) : '',
             notes: invoiceData.notes,
             terms: calculateTerms(),
             subtotal: formatNumber(subtotal),
@@ -1737,10 +1738,10 @@ export default function PaymentLinksPage() {
                   Due Date (Valid Until)
                 </label>
                 <input
-                  type="datetime-local"
+                  type="date"
                   value={invoiceData.dueDate}
                   onChange={(e) => setInvoiceData({ ...invoiceData, dueDate: e.target.value })}
-                  min={new Date().toISOString().slice(0, 16)}
+                  min={toDateInputValue()}
                   className="w-full rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm text-gray-900 shadow-sm focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500 dark:border-gray-600 dark:bg-gray-800 dark:text-white dark:shadow-none dark:focus:border-blue-400 dark:focus:ring-blue-400"
                 />
               </div>

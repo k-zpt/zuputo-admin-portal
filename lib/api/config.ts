@@ -57,7 +57,11 @@ export const API_ENDPOINTS = {
   
   // Notifications
   notifications: '/api/v1/notifications',
-  
+  customerNotifications: (customerId: string) =>
+    `/api/v1/customers/${customerId}/notifications`,
+  customerNotification: (customerId: string, notificationId: string) =>
+    `/api/v1/customers/${customerId}/notifications/${notificationId}`,
+
   // Discount Programs
   discountPrograms: '/api/v2/discount-programs',
   discountProgramsV1: '/api/v1/discount-programs',
@@ -66,6 +70,11 @@ export const API_ENDPOINTS = {
   // Subscription Plans
   subscriptionPlans: '/api/v2/subscription-plans',
   subscriptionPlanById: (id: string) => `/api/v2/subscription-plans/${id}`,
+
+  // Bookings (scheduling)
+  bookings: '/api/v2/bookings',
+  bookingAction: (id: string, action: 'confirm' | 'cancel' | 'reject' | 'reschedule') =>
+    `/api/v2/bookings/${id}/${action}`,
 
   // System / background jobs
   systemJobsConfig: '/api/v2/system/jobs/config',

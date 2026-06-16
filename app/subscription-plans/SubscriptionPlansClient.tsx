@@ -14,6 +14,7 @@ const SERVICE_TYPES = {
   CONTRACT_REVIEW: 'Contract Review',
   COMPANY_INCORPORATION: 'Company Incorporation',
   SOLE_PROPRIETORSHIP_INCORPORATION: 'Sole Proprietorship Incorporation',
+  LEGAL_CONSULTATION: 'Legal Consultation',
 } as const;
 
 type ServiceType = keyof typeof SERVICE_TYPES;
@@ -22,6 +23,17 @@ type ServiceType = keyof typeof SERVICE_TYPES;
 const formatServiceType = (serviceType: string): string => {
   return SERVICE_TYPES[serviceType as ServiceType] || serviceType;
 };
+
+/** Normalize benefits for PATCH diff (API may stringify numbers etc.). */
+function snapshotBenefitsForCompare(list: PlanBenefit[] | undefined) {
+  return (list ?? []).map((b) => ({
+    serviceType: String(b.serviceType ?? '').trim(),
+    description: String(b.description ?? '').trim(),
+    active: Boolean(b.active ?? true),
+    limit: Number(b.limit ?? 0),
+    discountPercent: Number(b.discountPercent ?? 0),
+  }));
+}
 
 /** Currency id for plan forms; supports camelCase or snake_case country payloads. */
 function resolveCountryDefaultCurrencyId(country: Country): string | undefined {
@@ -360,16 +372,21 @@ export default function SubscriptionPlansClient() {
           currency: formData.pricingInfo.currency,
         };
       }
-      
-      // Send only newly added benefits (backend adds these; sending full list would duplicate existing)
-      const existingServiceTypes = new Set((plan.benefits || []).map((b) => b.serviceType));
-      const newBenefitsToAdd = (formData.benefits || []).filter(
-        (fb) => !existingServiceTypes.has(fb.serviceType)
-      );
-      if (newBenefitsToAdd.length > 0) {
-        payload.benefits = newBenefitsToAdd;
+
+      // Benefits: include full list when anything changed (existing code only sent *new*
+      // service types, so edits to limit/discount/description/active never hit the API.)
+      const benefitsChanged =
+        JSON.stringify(snapshotBenefitsForCompare(formData.benefits)) !==
+        JSON.stringify(snapshotBenefitsForCompare(plan.benefits));
+      if (benefitsChanged) {
+        payload.benefits = formData.benefits ?? [];
       }
-      
+
+      if (Object.keys(payload).length === 0) {
+        setError('No changes to save.');
+        return;
+      }
+
       await subscriptionPlanService.update(editingPlanId, payload);
       setEditingPlanId(null);
       resetForm();

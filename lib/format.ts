@@ -71,6 +71,47 @@ function pad2(n: number): string {
   return String(n).padStart(2, '0');
 }
 
+/** YYYY-MM-DD for `<input type="date">`. */
+export function toDateInputValue(d: Date = new Date()): string {
+  return `${d.getFullYear()}-${pad2(d.getMonth() + 1)}-${pad2(d.getDate())}`;
+}
+
+/** YYYY-MM-DD for a date N calendar days from today (local). */
+export function addDaysToDateInputValue(days: number, from: Date = new Date()): string {
+  const d = new Date(from);
+  d.setDate(d.getDate() + days);
+  return toDateInputValue(d);
+}
+
+/**
+ * Parse YYYY-MM-DD (from type="date") to UTC midnight epoch ms.
+ * Backend date fields require zero time (00:00:00 UTC).
+ */
+export function dateInputToUtcMidnightMs(value: string): number | null {
+  const match = value.trim().match(/^(\d{4})-(\d{2})-(\d{2})/);
+  if (!match) return null;
+  const year = Number(match[1]);
+  const month = Number(match[2]);
+  const day = Number(match[3]);
+  if (!Number.isFinite(year) || !Number.isFinite(month) || !Number.isFinite(day)) return null;
+  return Date.UTC(year, month - 1, day, 0, 0, 0, 0);
+}
+
+/** Parse YYYY-MM-DD as local calendar midnight (for day-diff / terms). */
+export function parseDateInputLocal(value: string): Date | null {
+  const match = value.trim().match(/^(\d{4})-(\d{2})-(\d{2})/);
+  if (!match) return null;
+  const d = new Date(Number(match[1]), Number(match[2]) - 1, Number(match[3]));
+  return isNaN(d.getTime()) ? null : d;
+}
+
+/** Display dd/mm/yyyy from a date input value (YYYY-MM-DD). */
+export function formatDateInputValue(value: string): string {
+  const ms = dateInputToUtcMidnightMs(value);
+  if (ms == null) return '';
+  return formatDate(ms, { format: 'dd/mm/yyyy' });
+}
+
 /**
  * Format a date for display. Uses en-GB (day-first), not US formatting.
  * Accepts ISO string, DD/MM string "04/03/2026, 00:29:21", epoch ms, or Date.

@@ -1,6 +1,7 @@
 'use client';
 
 import { Sidebar } from './Sidebar';
+import { HeaderInbox } from './HeaderInbox';
 import { useSession } from "next-auth/react";
 import { signOut } from "next-auth/react";
 
@@ -52,7 +53,8 @@ export function AdminLayout({ children }: { children: React.ReactNode }) {
                 Admin Portal
               </h1>
             </div>
-            <div className="flex items-center gap-4">
+            <div className="flex items-center gap-3">
+              <HeaderInbox />
               {session?.user && (
                 <div className="flex items-center gap-3">
                   {session.user.image && (

@@ -430,6 +430,17 @@ export interface CreateNotificationPayload {
   source: string;
 }
 
+export interface AppNotification {
+  id: string;
+  header: string;
+  content: string;
+  hasBeenRead: boolean;
+  created: string;
+  type?: string;
+  source?: string;
+  [key: string]: unknown;
+}
+
 export interface SendEmailPayload {
   recipients: string[];
   subject: string;
@@ -683,4 +694,47 @@ export type SystemJobRecord = {
   status?: string;
   [key: string]: unknown;
 };
+
+// Scheduling / bookings
+export interface SchedulingBookingCustomer {
+  id: string;
+  email?: string;
+  name?: string;
+}
+
+export interface SchedulingBookingRescheduleEntry {
+  [key: string]: unknown;
+}
+
+export interface SchedulingBooking {
+  id: string;
+  lawyerEmail: string;
+  customer: SchedulingBookingCustomer;
+  start: string;
+  end: string;
+  status: string;
+  notes?: string | null;
+  meet_url?: string | null;
+  timezone: string;
+  created?: string;
+  modified?: string;
+  rescheduleLog?: SchedulingBookingRescheduleEntry[];
+}
+
+/** PATCH .../bookings/{id}/confirm or /reject response (unwrapped by backend). */
+export interface SchedulingBookingActionResponse {
+  status: string;
+  meet_url?: string | null;
+}
+
+export interface RejectBookingPayload {
+  notes: string;
+}
+
+export interface RescheduleBookingPayload {
+  new_start: string;
+  new_end: string;
+  timezone: string;
+  proposed_by: string;
+}
 

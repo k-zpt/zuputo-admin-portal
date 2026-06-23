@@ -6,13 +6,37 @@ import Link from 'next/link';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type { ApiResponse, SchedulingBooking } from '@/lib/api/types';
 
+/** Normalize datetime-local or API ISO to `YYYY-MM-DDTHH:mm:ss` for comparison. */
+function normalizeDatetime(value: string): string {
+  let v = value.trim().replace(' ', 'T');
+  v = v.replace(/\.\d{3}Z$/i, '').replace(/Z$/i, '');
+  if (v.length === 16) return `${v}:00`;
+  return v.slice(0, 19);
+}
+
+/**
+ * Parse booking start/end from the API.
+ * - With `Z` or offset: absolute instant.
+ * - Otherwise: wall-clock in the booking's IANA timezone (matches DB storage).
+ */
+function bookingDatetimeToUtcMs(value: string, timezone: string): number | null {
+  const trimmed = value.trim();
+  if (/Z$/i.test(trimmed) || /[+-]\d{2}:?\d{2}$/.test(trimmed)) {
+    const ms = Date.parse(trimmed.replace(' ', 'T'));
+    return Number.isNaN(ms) ? null : ms;
+  }
+  return zonedDatetimeToUtcMs(trimmed, timezone);
+}
+
 function formatBookingSlot(start: string, end: string, timezone: string): string {
   try {
-    const startDate = new Date(start);
-    const endDate = new Date(end);
-    if (Number.isNaN(startDate.getTime()) || Number.isNaN(endDate.getTime())) {
-      return `${start} – ${end}`;
+    const startMs = bookingDatetimeToUtcMs(start, timezone);
+    const endMs = bookingDatetimeToUtcMs(end, timezone);
+    if (startMs == null || endMs == null) {
+      return `${start} – ${end} (${timezone})`;
     }
+    const startDate = new Date(startMs);
+    const endDate = new Date(endMs);
     const dateFmt = new Intl.DateTimeFormat('en-GB', {
       day: '2-digit',
       month: 'short',
@@ -22,6 +46,7 @@ function formatBookingSlot(start: string, end: string, timezone: string): string
     const timeFmt = new Intl.DateTimeFormat('en-GB', {
       hour: '2-digit',
       minute: '2-digit',
+      hour12: false,
       timeZone: timezone,
     });
     return `${dateFmt.format(startDate)}, ${timeFmt.format(startDate)} – ${timeFmt.format(endDate)} (${timezone})`;
@@ -30,26 +55,84 @@ function formatBookingSlot(start: string, end: string, timezone: string): string
   }
 }
 
+function getDatetimeNormInTimezone(utcMs: number, timezone: string): string {
+  const parts = new Intl.DateTimeFormat('en-CA', {
+    timeZone: timezone,
+    year: 'numeric',
+    month: '2-digit',
+    day: '2-digit',
+    hour: '2-digit',
+    minute: '2-digit',
+    second: '2-digit',
+    hour12: false,
+  }).formatToParts(new Date(utcMs));
+  const get = (type: string) => parts.find((p) => p.type === type)?.value ?? '00';
+  return `${get('year')}-${get('month')}-${get('day')}T${get('hour')}:${get('minute')}:${get('second')}`;
+}
+
+/** Interpret a wall-clock datetime as belonging to `timezone` and return UTC ms. */
+function zonedDatetimeToUtcMs(value: string, timezone: string): number | null {
+  const norm = normalizeDatetime(value);
+  const [datePart, timePart] = norm.split('T');
+  const [year, month, day] = datePart.split('-').map(Number);
+  const [hour, minute, second = 0] = timePart.split(':').map(Number);
+  if (!year || !month || !day || Number.isNaN(hour) || Number.isNaN(minute)) {
+    return null;
+  }
+
+  const naiveUtc = Date.UTC(year, month - 1, day, hour, minute, second);
+  const windowMs = 36 * 60 * 60 * 1000;
+  const stepMs = 60 * 1000;
+  const target = norm.slice(0, 16);
+
+  for (let offset = 0; offset <= windowMs; offset += stepMs) {
+    for (const sign of [0, 1, -1] as const) {
+      const candidate = naiveUtc + sign * offset;
+      if (getDatetimeNormInTimezone(candidate, timezone).slice(0, 16) === target) {
+        return candidate;
+      }
+    }
+  }
+  return null;
+}
+
+function utcMsToDatetimeLocal(utcMs: number, timezone: string): string {
+  return getDatetimeNormInTimezone(utcMs, timezone).slice(0, 16);
+}
+
+/** If end is before start, bump end forward (preserving slot duration when possible). */
+function adjustEndForStart(
+  newStart: string,
+  currentEnd: string,
+  timezone: string,
+  slotDurationMs: number
+): string {
+  if (!newStart.trim()) return currentEnd;
+  const tz = timezone.trim() || 'UTC';
+  const newStartMs = zonedDatetimeToUtcMs(newStart, tz);
+  if (newStartMs == null) return currentEnd;
+
+  const currentEndMs = currentEnd.trim() ? zonedDatetimeToUtcMs(currentEnd, tz) : null;
+  if (currentEndMs != null && currentEndMs >= newStartMs) return currentEnd;
+
+  const durationMs = slotDurationMs > 0 ? slotDurationMs : 30 * 60 * 1000;
+  return utcMsToDatetimeLocal(newStartMs + durationMs, tz);
+}
+
 /** True when the booking end time (in its timezone) is before now. */
 function isBookingPast(end: string, timezone: string): boolean {
   try {
-    const endNorm = end.trim().replace(' ', 'T').slice(0, 19);
-    const parts = new Intl.DateTimeFormat('en-CA', {
-      timeZone: timezone,
-      year: 'numeric',
-      month: '2-digit',
-      day: '2-digit',
-      hour: '2-digit',
-      minute: '2-digit',
-      second: '2-digit',
-      hour12: false,
-    }).formatToParts(new Date());
-    const get = (type: string) => parts.find((p) => p.type === type)?.value ?? '00';
-    const nowNorm = `${get('year')}-${get('month')}-${get('day')}T${get('hour')}:${get('minute')}:${get('second')}`;
-    return endNorm <= nowNorm;
+    const endMs = bookingDatetimeToUtcMs(end, timezone);
+    if (endMs == null) return false;
+    return endMs <= Date.now();
   } catch {
     return false;
   }
+}
+
+function isApprovedStatus(status: string): boolean {
+  const s = status.toUpperCase();
+  return s === 'CONFIRMED' || s === 'APPROVED';
 }
 
 function getBookingStatusClasses(status: string): string {
@@ -57,6 +140,7 @@ function getBookingStatusClasses(status: string): string {
     case 'PENDING':
       return 'bg-yellow-100 text-yellow-800 dark:bg-yellow-900/30 dark:text-yellow-200';
     case 'CONFIRMED':
+    case 'APPROVED':
       return 'bg-green-100 text-green-800 dark:bg-green-900/30 dark:text-green-200';
     case 'REJECTED':
     case 'CANCELLED':
@@ -68,7 +152,46 @@ function getBookingStatusClasses(status: string): string {
 
 function bookingHasActions(status: string): boolean {
   const s = status.toUpperCase();
-  return s === 'PENDING' || s === 'CONFIRMED';
+  return s === 'PENDING' || isApprovedStatus(s);
+}
+
+/** Returns a user-facing error message, or null when valid. */
+function validateRescheduleTimes(
+  newStart: string,
+  newEnd: string,
+  timezone: string
+): string | null {
+  if (!newStart.trim() || !newEnd.trim()) {
+    return 'Start and end times are required.';
+  }
+  const startMs = zonedDatetimeToUtcMs(newStart, timezone);
+  const endMs = zonedDatetimeToUtcMs(newEnd, timezone);
+  if (startMs == null || endMs == null) {
+    return 'Invalid start or end time for the selected timezone.';
+  }
+  if (startMs <= Date.now()) {
+    return 'New start time cannot be in the past.';
+  }
+  if (endMs < startMs) {
+    return 'End time cannot be before start time.';
+  }
+  return null;
+}
+
+function openDatetimePicker(input: HTMLInputElement, event: React.MouseEvent<HTMLInputElement>) {
+  if (event.target !== input) return;
+  try {
+    input.showPicker?.();
+  } catch {
+    input.focus();
+  }
+}
+
+/** Prefill datetime-local from API value in the booking's timezone. */
+function bookingDatetimeToDatetimeLocal(value: string, timezone: string): string {
+  const ms = bookingDatetimeToUtcMs(value, timezone);
+  if (ms == null) return isoToDatetimeLocal(value);
+  return utcMsToDatetimeLocal(ms, timezone);
 }
 
 /** API expects `YYYY-MM-DDTHH:mm:ss`; datetime-local gives `YYYY-MM-DDTHH:mm`. */
@@ -124,6 +247,7 @@ function BookingActionsMenu({
   }
 
   const isPending = booking.status.toUpperCase() === 'PENDING';
+  const isApproved = isApprovedStatus(booking.status);
   const isOpen = openActionsMenuId === booking.id;
 
   const menuItemClass =
@@ -161,6 +285,10 @@ function BookingActionsMenu({
               Confirm
             </button>
           )}
+          <button type="button" onClick={() => onReschedule(booking)} className={menuItemClass}>
+            <span className="inline-flex h-2 w-2 rounded-full bg-blue-500" />
+            Reschedule
+          </button>
           {isPending && (
             <button
               type="button"
@@ -171,18 +299,16 @@ function BookingActionsMenu({
               Reject
             </button>
           )}
-          <button type="button" onClick={() => onReschedule(booking)} className={menuItemClass}>
-            <span className="inline-flex h-2 w-2 rounded-full bg-blue-500" />
-            Reschedule
-          </button>
-          <button
-            type="button"
-            onClick={() => onCancel(booking)}
-            className={`${menuItemClass} hover:bg-amber-50 dark:hover:bg-amber-900/20`}
-          >
-            <span className="inline-flex h-2 w-2 rounded-full bg-amber-500" />
-            Cancel
-          </button>
+          {isApproved && (
+            <button
+              type="button"
+              onClick={() => onCancel(booking)}
+              className={`${menuItemClass} hover:bg-amber-50 dark:hover:bg-amber-900/20`}
+            >
+              <span className="inline-flex h-2 w-2 rounded-full bg-amber-500" />
+              Cancel
+            </button>
+          )}
         </div>
       )}
     </div>
@@ -211,6 +337,13 @@ export default function SchedulingBookingsPage() {
     proposed_by: '',
   });
   const actionsMenuRef = useRef<HTMLDivElement>(null);
+  const rescheduleSlotDurationMsRef = useRef(30 * 60 * 1000);
+
+  const syncRescheduleEnd = useCallback(
+    (start: string, end: string, timezone: string) =>
+      adjustEndForStart(start, end, timezone, rescheduleSlotDurationMsRef.current),
+    []
+  );
 
   const rescheduleTimezoneOptions = useMemo(() => {
     const current = rescheduleForm.timezone.trim();
@@ -230,6 +363,15 @@ export default function SchedulingBookingsPage() {
     document.addEventListener('mousedown', handleClickOutside);
     return () => document.removeEventListener('mousedown', handleClickOutside);
   }, [openActionsMenuId]);
+
+  useEffect(() => {
+    if (!showRescheduleModal || !rescheduleForm.new_start) return;
+    setRescheduleForm((f) => {
+      const syncedEnd = syncRescheduleEnd(f.new_start, f.new_end, f.timezone);
+      if (syncedEnd === f.new_end) return f;
+      return { ...f, new_end: syncedEnd };
+    });
+  }, [showRescheduleModal, rescheduleForm.new_start, rescheduleForm.timezone, syncRescheduleEnd]);
 
   const loadBookings = useCallback(async (append = false) => {
     try {
@@ -345,9 +487,16 @@ export default function SchedulingBookingsPage() {
   const openRescheduleModal = (booking: SchedulingBooking) => {
     setOpenActionsMenuId(null);
     setRescheduleTarget(booking);
+    const tz = booking.timezone || 'UTC';
+    const newStart = bookingDatetimeToDatetimeLocal(booking.start, tz);
+    const newEnd = bookingDatetimeToDatetimeLocal(booking.end, tz);
+    const startMs = bookingDatetimeToUtcMs(booking.start, tz);
+    const endMs = bookingDatetimeToUtcMs(booking.end, tz);
+    rescheduleSlotDurationMsRef.current =
+      startMs != null && endMs != null && endMs > startMs ? endMs - startMs : 30 * 60 * 1000;
     setRescheduleForm({
-      new_start: isoToDatetimeLocal(booking.start),
-      new_end: isoToDatetimeLocal(booking.end),
+      new_start: newStart,
+      new_end: newEnd,
       timezone: booking.timezone || '',
       proposed_by: booking.customer?.id || '',
     });
@@ -371,6 +520,15 @@ export default function SchedulingBookingsPage() {
     const proposed_by = rescheduleForm.proposed_by.trim();
     if (!new_start || !new_end || !timezone || !proposed_by) {
       setError('All reschedule fields are required.');
+      return;
+    }
+    const validationError = validateRescheduleTimes(
+      rescheduleForm.new_start,
+      rescheduleForm.new_end,
+      timezone
+    );
+    if (validationError) {
+      setError(validationError);
       return;
     }
     try {
@@ -428,6 +586,7 @@ export default function SchedulingBookingsPage() {
               <option value="">All statuses</option>
               <option value="PENDING">Pending</option>
               <option value="CONFIRMED">Confirmed</option>
+              <option value="APPROVED">Approved</option>
               <option value="REJECTED">Rejected</option>
               <option value="CANCELLED">Cancelled</option>
             </select>
@@ -667,39 +826,49 @@ export default function SchedulingBookingsPage() {
             </p>
             <form onSubmit={handleReschedule} className="mt-4 space-y-4">
               <div>
-                <label
-                  htmlFor="reschedule-start"
+                <span
+                  id="reschedule-start-label"
                   className="block text-sm font-medium text-gray-700 dark:text-gray-300"
                 >
                   New start *
-                </label>
+                </span>
                 <input
                   id="reschedule-start"
                   type="datetime-local"
                   required
+                  aria-labelledby="reschedule-start-label"
                   value={rescheduleForm.new_start}
-                  onChange={(e) =>
-                    setRescheduleForm((f) => ({ ...f, new_start: e.target.value }))
-                  }
-                  className="mt-1 w-full rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm text-gray-900 shadow-sm focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500 dark:border-gray-600 dark:bg-gray-800 dark:text-white dark:shadow-none dark:focus:border-blue-400 dark:focus:ring-blue-400"
+                  onClick={(e) => openDatetimePicker(e.currentTarget, e)}
+                  onChange={(e) => {
+                    const newStart = e.target.value;
+                    setRescheduleForm((f) => ({
+                      ...f,
+                      new_start: newStart,
+                      new_end: syncRescheduleEnd(newStart, f.new_end, f.timezone),
+                    }));
+                  }}
+                  className="mt-1 block w-full cursor-pointer rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm text-gray-900 shadow-sm focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500 dark:border-gray-600 dark:bg-gray-800 dark:text-white dark:shadow-none dark:focus:border-blue-400 dark:focus:ring-blue-400"
                 />
               </div>
               <div>
-                <label
-                  htmlFor="reschedule-end"
+                <span
+                  id="reschedule-end-label"
                   className="block text-sm font-medium text-gray-700 dark:text-gray-300"
                 >
                   New end *
-                </label>
+                </span>
                 <input
                   id="reschedule-end"
                   type="datetime-local"
                   required
+                  aria-labelledby="reschedule-end-label"
+                  min={rescheduleForm.new_start || undefined}
                   value={rescheduleForm.new_end}
+                  onClick={(e) => openDatetimePicker(e.currentTarget, e)}
                   onChange={(e) =>
                     setRescheduleForm((f) => ({ ...f, new_end: e.target.value }))
                   }
-                  className="mt-1 w-full rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm text-gray-900 shadow-sm focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500 dark:border-gray-600 dark:bg-gray-800 dark:text-white dark:shadow-none dark:focus:border-blue-400 dark:focus:ring-blue-400"
+                  className="mt-1 block w-full cursor-pointer rounded-lg border border-gray-300 bg-white px-3 py-2 text-sm text-gray-900 shadow-sm focus:border-blue-500 focus:outline-none focus:ring-1 focus:ring-blue-500 dark:border-gray-600 dark:bg-gray-800 dark:text-white dark:shadow-none dark:focus:border-blue-400 dark:focus:ring-blue-400"
                 />
               </div>
               <div>
@@ -713,9 +882,33 @@ export default function SchedulingBookingsPage() {
                   id="reschedule-timezone"
                   required
                   value={rescheduleForm.timezone}
-                  onChange={(e) =>
-                    setRescheduleForm((f) => ({ ...f, timezone: e.target.value }))
-                  }
+                  onChange={(e) => {
+                    const newTimezone = e.target.value;
+                    setRescheduleForm((f) => {
+                      const prevTimezone = f.timezone.trim();
+                      if (
+                        !prevTimezone ||
+                        !f.new_start ||
+                        !f.new_end ||
+                        prevTimezone === newTimezone
+                      ) {
+                        return { ...f, timezone: newTimezone };
+                      }
+                      const startMs = zonedDatetimeToUtcMs(f.new_start, prevTimezone);
+                      const endMs = zonedDatetimeToUtcMs(f.new_end, prevTimezone);
+                      if (startMs == null || endMs == null) {
+                        return { ...f, timezone: newTimezone };
+                      }
+                      const newStart = utcMsToDatetimeLocal(startMs, newTimezone);
+                      const newEnd = utcMsToDatetimeLocal(endMs, newTimezone);
+                      return {
+                        ...f,
+                        timezone: newTimezone,
+                        new_start: newStart,
+                        new_end: syncRescheduleEnd(newStart, newEnd, newTimezone),
+                      };
+                    });
+                  }}
                   className={selectFieldClass}
                 >
                   <option value="">Select timezone</option>
